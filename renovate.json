@@ -1,0 +1,89 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":configMigration",
+    ":preserveSemverRanges",
+    "abandonments:recommended",
+    "group:all",
+    "packages:linters",
+    "schedule:weekly",
+    ":dependencyDashboard",
+    ":automergeBranch",
+    ":automergeMinor",
+    ":ignoreModulesAndTests",
+    "docker:enableMajor",
+    "preview:dockerCompose",
+    ":enablePreCommit"
+  ],
+  "automerge": true,
+  "forkProcessing": "enabled",
+  "ignoreTests": true,
+  "abandonmentThreshold": "2 years",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "extends": ["schedule:monthly"]
+  },
+  "labels": ["dependencies"],
+  "timezone": "Europe/Berlin",
+  "cargo": {
+    "rangeStrategy": "update-lockfile"
+  },
+  "postUpdateOptions": ["yarnDedupeHighest", "gomodTidy", "pnpmDedupe"],
+  "packageRules": [
+    {
+      "description": "Require dashboard approval for 0.x major bumps",
+      "matchCurrentVersion": "/^0/",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false
+    },
+    {
+      "description": "Automerge linters at any time, bypassing weekly schedule",
+      "matchCategories": ["linters"],
+      "schedule": ["at any time"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "jsonata",
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@biomejs/biome",
+      "fileFormat": "json",
+      "managerFilePatterns": ["**/biome.{json,jsonc}"],
+      "matchStrings": ["{\"currentValue\": $split($.\"$schema\",(\"/\"))[-2]}"]
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "**/[Dd]ockerfile*",
+        "**/[Cc]ontainerfile*",
+        "**/*.[Dd]ockerfile*",
+        "**/*.[Cc]ontainerfile*"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-zA-Z0-9-._]+?) depName=(?<depName>[^\\s]+?)(?: (lookupName|packageName)=(?<packageName>[^\\s]+?))?(?: versioning=(?<versioning>[^\\s]+?))?(?: extractVersion=(?<extractVersion>[^\\s]+?))?(?: registryUrl=(?<registryUrl>[^\\s]+?))?\\s(?:ENV|ARG)\\s+[A-Za-z0-9_]+?_VERSION[ =][\"']?(?<currentValue>.+?)[\"']?\\s"
+      ]
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)(workflow-templates|\\.(?:github|gitea|forgejo)/(?:workflows|actions))/.+\\.ya?ml$/",
+        "/(^|/)action\\.ya?ml$/"
+      ],
+      "datasourceTemplate": "github-tags",
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-zA-Z0-9-._]+?) depName=(?<depName>[^\\s]+?)(?: (?:lookupName|packageName)=(?<packageName>[^\\s]+?))?(?: versioning=(?<versioning>[^\\s]+?))?(?: extractVersion=(?<extractVersion>[^\\s]+?))?(?: registryUrl=(?<registryUrl>[^\\s]+?))?\\s+[A-Za-z0-9_]+?_VERSION\\s*:\\s*[\"']?(?<currentValue>.+?)[\"']?\\s"
+      ]
+    },
+    {
+      "autoReplaceStringTemplate": "\"@tsconfig/node{{{major}}}/tsconfig.json\"",
+      "currentValueTemplate": "{{{major}}}",
+      "customType": "regex",
+      "datasourceTemplate": "npm",
+      "managerFilePatterns": ["**/{j,t}sconfig.json", "**/{j,t}sconfig.*.json"],
+      "matchStrings": ["\"(?<depName>@tsconfig/node(?<major>\\d+))/tsconfig\\.json\""]
+    }
+  ]
+}
