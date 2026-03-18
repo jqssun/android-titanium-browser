@@ -42,6 +42,7 @@ git submodule foreach git config -f ./.git/config submodule.$name.ignore all
 git config --add remote.origin.fetch '+refs/tags/*:refs/tags/*'
 
 # https://grapheneos.org/build#browser-and-webview
+rm -rf $SCRIPT_DIR/vanadium/patches/*trichrome-{apk-build-targets,browser-apk-targets}.patch
 replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "HELIUM"
 replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Helium"
 replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "helium"
@@ -60,6 +61,10 @@ rm -rf third_party/angle/third_party/VK-GL-CTS/
 
 sed -i 's/BASE_FEATURE(kExtensionManifestV2Unsupported, base::FEATURE_ENABLED_BY_DEFAULT);/BASE_FEATURE(kExtensionManifestV2Unsupported, base::FEATURE_DISABLED_BY_DEFAULT);/' extensions/common/extension_features.cc
 sed -i 's/BASE_FEATURE(kExtensionManifestV2Disabled, base::FEATURE_ENABLED_BY_DEFAULT);/BASE_FEATURE(kExtensionManifestV2Disabled, base::FEATURE_DISABLED_BY_DEFAULT);/' extensions/common/extension_features.cc
+sed -i '/feature_overrides.EnableFeature(::features::kSkipVulkanBlocklist);/d' chrome/browser/chrome_browser_field_trials.cc
+sed -i '/feature_overrides.EnableFeature(::features::kDefaultANGLEVulkan);/d' chrome/browser/chrome_browser_field_trials.cc
+sed -i '/feature_overrides.EnableFeature(::features::kVulkanFromANGLE);/d' chrome/browser/chrome_browser_field_trials.cc
+sed -i '/feature_overrides.EnableFeature(::features::kDefaultPassthroughCommandDecoder);/d' chrome/browser/chrome_browser_field_trials.cc
 : << TOOLBAR_PHONE
 sed -i '/<ViewStub/{N;N;N;N;N;N; /optional_button_stub/a\
 \
@@ -94,23 +99,19 @@ google_api_key = "x"
 google_default_client_id = "x"
 google_default_client_secret = "x"
 
-blink_symbol_level=0
-build_contextual_search=false
-build_with_tflite_lib=true
-chrome_pgo_phase=0
-dcheck_always_on=false
-enable_hangout_services_extension=false
-enable_iterator_debugging=false
-enable_mdns=false
-exclude_unwind_tables=false
-icu_use_data_file=true
-rtc_build_examples=false
-use_debug_fission=false
-use_errorprone_java_compiler=false
-use_official_google_api_keys=false
-use_rtti=false
-enable_av1_decoder=true
-enable_dav1d_decoder=true
+use_siso = true
+use_login_database_as_backend = false
+build_contextual_search = false
+build_with_tflite_lib = true
+dcheck_always_on = false
+enable_iterator_debugging = false
+exclude_unwind_tables = false
+icu_use_data_file = true
+rtc_build_examples = false
+use_errorprone_java_compiler = false
+use_rtti = false
+enable_av1_decoder = true
+enable_dav1d_decoder = true
 include_both_v8_snapshots = false
 include_both_v8_snapshots_android_secondary_abi = false
 generate_linker_map = false
@@ -132,11 +133,16 @@ enable_pointer_compression_support = true
 v8_enable_pointer_compression = true
 EOF
 gn gen out/Default # gn args out/Default; echo 'treat_warnings_as_errors = false' >> out/Default/args.gn
-# Use aggressive parallelism: nproc + 4 for better core utilization
-NINJA_JOBS=${JOBS:-$(($(nproc) + 4))}
-autoninja -C out/Default -j "$NINJA_JOBS" chrome_public_apk
+autoninja -C out/Default chrome_public_apk
+mkdir -p out/tmp out/release
+mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-arm64-v8a.apk
+
+sed -i 's/target_cpu = "arm64"/target_cpu = "arm"/' out/Default/args.gn
+autoninja -C out/Default chrome_public_apk
+mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-armeabi-v7a.apk
 
 export PATH=$PWD/third_party/jdk/current/bin/:$PATH
 export ANDROID_HOME=$PWD/third_party/android_sdk/public
-mkdir -p out/Default/apks/release
-sign_apk $(find out/Default/apks -name 'Chrome*.apk') out/Default/apks/release/$VERSION.apk
+sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk
+sign_apk out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk
+rm -rf $SCRIPT_DIR/keys

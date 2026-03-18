@@ -17,5 +17,4 @@ sign_apk() {
     export apksigner=$(find $ANDROID_HOME/build-tools -name apksigner | sort | tail -n 1)
     source $SCRIPT_DIR/keys/local.properties
     $apksigner sign -verbose -ks $SCRIPT_DIR/keys/test.jks --ks-pass pass:$storePassword --key-pass pass:$keyPassword --ks-key-alias $keyAlias --out $2 $1 || exit 1
-    rm -rf $SCRIPT_DIR/keys
 }
