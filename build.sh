@@ -65,7 +65,6 @@ sed -i '/feature_overrides.EnableFeature(::features::kSkipVulkanBlocklist);/d' c
 sed -i '/feature_overrides.EnableFeature(::features::kDefaultANGLEVulkan);/d' chrome/browser/chrome_browser_field_trials.cc
 sed -i '/feature_overrides.EnableFeature(::features::kVulkanFromANGLE);/d' chrome/browser/chrome_browser_field_trials.cc
 sed -i '/feature_overrides.EnableFeature(::features::kDefaultPassthroughCommandDecoder);/d' chrome/browser/chrome_browser_field_trials.cc
-: << TOOLBAR_PHONE
 sed -i '/<ViewStub/{N;N;N;N;N;N; /optional_button_stub/a\
 \
         <ViewStub\
@@ -75,7 +74,6 @@ sed -i '/<ViewStub/{N;N;N;N;N;N; /optional_button_stub/a\
             android:layout_height="match_parent" />
 }' chrome/browser/ui/android/toolbar/java/res/layout/toolbar_phone.xml
 sed -i 's/extension_toolbar_baseline_width">600dp/extension_toolbar_baseline_width">0dp/' chrome/browser/ui/android/extensions/java/res/values/dimens.xml
-TOOLBAR_PHONE
 
 cat > out/Default/args.gn <<EOF
 chrome_public_manifest_package = "io.github.jqssun.helium"
