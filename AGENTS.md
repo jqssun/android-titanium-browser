@@ -1,221 +1,211 @@
-# Working with Claude on Helium Browser
+# AGENTS.md — Helium Browser for Android
 
-This document provides best practices and guidelines for collaborating with Claude Code on the Android Helium Browser project.
+Guidelines for AI agents (Claude Code, Copilot, etc.) working in this repository.
+
+> `CLAUDE.md` is a symlink to this file.
+
+---
 
 ## Project Overview
 
-Helium Browser is an experimental Chromium-based web browser for Android with:
-- Extensions support
-- Privacy and security hardening (based on Helium and Vanadium)
-- Custom patches applied to Chromium source
-- Automated CI/CD build pipeline using GitHub Actions
-- APK signing and release management
+**Helium Browser for Android** is a Chromium-based Android browser combining:
+- [Helium](https://github.com/imputnet/helium) — extensions support and branding patches
+- [Vanadium](https://github.com/GrapheneOS/Vanadium) — security and privacy hardening patches
 
-**Key Files:**
-- `build.sh` - Main build orchestration script
-- `common.sh` - Shared build utilities
-- `.github/workflows/build.yml` - GitHub Actions workflow
-- `vanadium/args.gn` - Chromium GN build configuration
+Outputs: signed ARM64 + ARMv7 APKs published as GitHub Releases.
 
-## Build System Overview
+---
 
-The build process involves:
-
-1. **Dependency Setup** - Clone Chromium source with depot_tools
-2. **Patch Application** - Apply Helium and Vanadium patches
-3. **Build Configuration** - Set GN arguments for Android ARM64
-4. **Compilation** - Use autoninja with LLD linker
-5. **APK Signing** - Sign with keystore and release
-
-### Build Configuration (args.gn)
-
-Key optimization flags:
-```
-use_lld = true                      # High-performance linker
-use_thin_lto = false                # Disabled for speed
-enable_precompiled_headers = true   # Faster compilation
-symbol_level = 0                    # No debug symbols
-target_cpu = "arm64"                # ARM64 target
-```
-
-## Common Tasks
-
-### Optimizing Build Performance
-
-When the build is slow or timing out:
-
-1. Check current args.gn settings - compare `use_thin_lto`, `symbol_level`, `enable_precompiled_headers`
-2. Disable expensive optimizations (ThinLTO, debug symbols)
-3. Enable precompiled headers
-4. Increase parallelism with `-j` flag (consider `nproc + 4`)
-5. Optimize CI/CD workflow:
-   - Use `endersonmenezes/free-disk-space@v3` for fast cleanup
-   - Add `vegardit/fast-apt-mirror.sh@v1` for faster APT downloads
-   - Set explicit timeout-minutes (e.g., 180)
-
-**Ask Claude:** "The build is timing out at X minutes. Can you analyze the bottlenecks and suggest optimizations?"
-
-### Updating Chromium Base
-
-When updating to a new Chromium version:
-
-1. Check vanadium tag updates - documented in the patch process
-2. Verify Helium patches still apply cleanly
-3. Test build locally before pushing
-4. Document breaking changes
-
-**Ask Claude:** "How do I update Chromium to version X while maintaining our patches?"
-
-### Modifying Build Arguments
-
-When adjusting GN arguments:
-
-1. Understand the trade-off (size vs. speed vs. features)
-2. Test locally first if possible
-3. Document the change and rationale
-4. Monitor build time impact
-
-**Ask Claude:** "What's the impact of changing [flag] to [value]? How do I test this?"
-
-### Debugging Build Failures
-
-When builds fail:
-
-1. Check the error message and which phase failed (gclient sync, patching, compilation, linking, signing)
-2. Isolate the issue (dependency, patch conflict, configuration)
-3. Provide context about recent changes
-
-**Ask Claude:** "The build failed at [phase] with error: [message]. What's the most likely cause?"
-
-### Git Workflow
-
-This project uses feature branches prefixed with `claude/`:
-- Branch naming: `claude/[task-description]-[session-id]`
-- Changes are committed with clear messages
-- Push to the feature branch only
-- PR workflow: feature branch → main
-
-**Ask Claude:** "How do I commit these changes and push to the feature branch?"
-
-## Build Optimization Patterns
-
-### Disk Space Management
-
-GitHub Actions runners have limited disk space. The workflow includes:
-- Fast cleanup action (`endersonmenezes/free-disk-space@v3`)
-- Removal of unnecessary packages and tools
-- Docker image cleanup
-- Cache strategy for large artifacts
-
-Use the `free-disk-space` action parameters to control what gets cleaned up.
-
-### Dependency Caching
-
-Currently cached:
-- `depot_tools` - Chromium tools
-- `.gclient_entries` - Lightweight Chromium metadata (avoids caching `third_party/`)
-
-Adding new caches:
-- Define key based on file hash (use `hashFiles()`)
-- Provide restore-keys for fallback
-- Avoid caching large directories (>10GB)
-
-### Parallelism
-
-- `gclient sync` uses `-j $(nproc)`
-- `autoninja` currently uses `-j $(( $(nproc) + 4 ))` by default for better core utilization on high-core machines. This can be overridden by setting the `JOBS` environment variable.
-
-## File Structure
+## Repository Structure
 
 ```
 android-helium-browser/
-├── build.sh                    # Main build script
-├── common.sh                   # Shared utilities
-├── CLAUDE.md                   # This file
-├── README.md                   # Project documentation
-├── vanadium/                   # Vanadium patches and args
-│   └── args.gn                 # Build configuration template
-├── chromium/                   # Chromium source (cloned at build time)
-├── depot_tools/                # Chromium tools (cloned at build time)
-└── .github/workflows/
-    └── build.yml               # GitHub Actions workflow
+├── build.sh                  # Main build orchestration (entry point)
+├── common.sh                 # Shared helpers: set_keys(), sign_apk(), replace()
+├── AGENTS.md                 # This file (CLAUDE.md is a symlink to this)
+├── README.md                 # User-facing documentation
+├── Chromium-Browser.md       # Future roadmap / reference projects
+├── TODO.md                   # Open tasks
+├── PLAN.md                   # Notes and planning references
+├── renovate.json             # Renovate dependency update config
+├── vanadium/                 # Git submodule — Vanadium source (patches + args.gn)
+│   └── args.gn               # Build configuration template (Chromium GN flags)
+├── helium/                   # Git submodule — Helium source (patches + utils)
+└── .github/
+    ├── workflows/build.yml   # GitHub Actions CI/CD workflow
+    ├── dependabot.yml        # Dependabot config (Actions + submodules)
+    └── copilot-instructions.md  # GitHub Copilot context (mirrors this file)
 ```
 
-## Asking Claude for Help
+> **File discovery:** Use `rg --files` or `rg -l <pattern>` rather than `find`/`ls`.
+> Examples:
+> ```bash
+> rg --files                         # all tracked files
+> rg -l 'target_cpu'                 # files mentioning a flag
+> rg 'sign_apk' --type sh            # bash files with sign_apk
+> rg 'actions/cache' .github/        # cache usage in workflows
+> ```
 
-### Good Requests
+---
 
-✅ "The build timeout increased from 1h to 1.5h. What changed and how can we optimize?"
-✅ "Can you update the workflow to use the endersonmenezes/free-disk-space action?"
-✅ "How do I add caching for X artifact?"
-✅ "What's the impact of disabling ThinLTO on APK size and build speed?"
-✅ "Can you review the args.gn settings for optimization opportunities?"
+## Build System
 
-### Provide Context
+### High-Level Flow
 
-Include:
-- Specific build errors or timeouts
-- Recent changes you made
-- Current resource constraints (GitHub Actions vs. self-hosted)
-- Target metrics (build time, APK size)
-- Error messages or logs
+```
+build.sh
+  ├── common.sh → set_keys()          decode keystore secrets from env
+  ├── apt-get install                 minimal build deps
+  ├── clone depot_tools               if not cached
+  ├── git fetch chromium@$VERSION     shallow fetch of exact tag
+  ├── gclient sync                    sync Android deps (no history, no third_party cache)
+  ├── apply vanadium patches          rename VANADIUM→HELIUM, apply *.patch via git am
+  ├── inline sed patches              extension MV2 flags, toolbar layout, dimen fixes
+  ├── gn gen out/Default              generate build files from args.gn
+  ├── autoninja arm64                 compile chrome_public_apk
+  ├── autoninja armeabi-v7a           reuse build dir, swap target_cpu
+  └── sign_apk × 2                   sign with apksigner from Android SDK
+```
 
-### What Claude Can Do
+### Key Build Configuration (`out/Default/args.gn` generated in `build.sh`)
 
-- Analyze build performance bottlenecks
-- Suggest GN argument changes with trade-off analysis
-- Optimize GitHub Actions workflows
-- Debug build failures and suggest fixes
-- Refactor scripts for clarity and efficiency
-- Review configuration changes
+| Flag | Value | Notes |
+|------|-------|-------|
+| `target_os` | `android` | |
+| `target_cpu` | `arm64` → `arm` | switched between the two builds |
+| `is_official_build` | `true` | |
+| `symbol_level` | `0` | no debug symbols, faster builds |
+| `use_lld` | `true` | fast linker |
+| `use_thin_lto` | `true` | LTO enabled; disable to save ~30–50 min at cost of ~2–3% size |
+| `use_siso` | `true` | Siso build system |
+| `proprietary_codecs` | `true` | H.264/AAC support |
+| `chrome_public_manifest_package` | `io.github.jqssun.helium` | app package ID |
 
-### What Claude Cannot Do
+The Chromium version is read directly from `vanadium/args.gn`:
+```bash
+VERSION=$(grep -m1 -o '[0-9]\+\(\.[0-9]\+\)\{3\}' vanadium/args.gn)
+```
 
-- Modify security-sensitive code without clear authorization
-- Commit and push without your explicit request
-- Make breaking changes to patches without testing
-- Change build targets or outputs without approval
+### CI/CD Workflow (`.github/workflows/build.yml`)
 
-## Recent Optimizations
+Key steps in order:
+1. Checkout with submodules (`filter: blob:none`, `fetch-depth: 1`)
+2. Cache `depot_tools` (keyed on OS)
+3. Cache `chromium/.gclient_entries` (keyed on `vanadium/args.gn` hash)
+4. Optimize APT mirrors (`vegardit/fast-apt-mirror.sh@v1`)
+5. Free disk space (`endersonmenezes/free-disk-space@v3`) — removes Android SDK, .NET, Haskell, etc.
+6. Auto-update `vanadium` submodule to latest tag and push if changed
+7. Run `build.sh` (needs `LOCAL_TEST_JKS` and `STORE_TEST_JKS` secrets)
+8. Rename APKs with unix timestamp, publish via `softprops/action-gh-release@v2`
 
-The build was recently optimized to prevent 1.5h+ timeouts:
+Secrets required:
+- `LOCAL_TEST_JKS` — base64-encoded `local.properties` (keyAlias, keyPassword, storePassword)
+- `STORE_TEST_JKS` — base64-encoded `test.jks` keystore file
 
-- Disabled ThinLTO (major time savings, ~2-3% size increase)
-- Lowered symbol levels to 0 (removes debug symbols)
-- Enabled precompiled headers
-- Switched to faster disk cleanup action
-- Added APT mirror optimization
-- Increased build parallelism
-- Set explicit 180-minute timeout
+---
 
-These changes brought estimated build time down by 30-50 minutes.
+## Development Workflow
 
-## Debugging Tips
+### Branch Naming
 
-**Build gets stuck at 1.5h:**
-- Check if it's CPU-bound (ninja busy) or I/O-bound (disk/network)
-- Run with more verbose output if available
-- Consider disabling expensive optimizations
-- Check available disk space
+```
+claude/<task-description>-<session-id>
+```
 
-**Patches fail to apply:**
-- Verify Chromium version matches patch expectations
-- Check for conflicts between Helium and Vanadium patches
-- Review recent changes to patched files upstream
+All feature work goes on a `claude/` branch. PRs target `master` (default branch for builds) or `main`.
 
-**APK signing fails:**
-- Verify keystore secrets are correctly base64-encoded
-- Check keystore password and key alias are correct
-- Ensure APK file was actually built
+### Typical Task Flow
 
-**APT package issues:**
-- Network timeouts during `apt update` - retry is built in
-- Missing packages - update apt mirrors or use fallback packages
-- Parallel downloads failures - reduce parallelism in edge cases
+1. Check out the correct branch: `git checkout claude/<task>-<id>` (create if needed)
+2. Make changes; read files before editing
+3. Commit with a clear message explaining *why*, not just *what*
+4. Push: `git push -u origin <branch>`
+5. Open PR targeting `master`
+
+### Commit Style
+
+- Imperative mood, present tense: `"Fix timeout in build step"`, not `"Fixed timeout"`
+- Reference the affected file/component where helpful: `"build.sh: increase nproc parallelism"`
+
+---
+
+## Common Tasks
+
+### Debugging Build Failures
+
+1. Identify which phase failed: `apt-get`, `gclient sync`, `git am` (patching), `gn gen`, `autoninja`, `apksigner`
+2. Check for patch conflicts — Helium and Vanadium patches may conflict after Chromium upstream changes
+3. Verify `VERSION` parsed correctly from `vanadium/args.gn`
+4. Check disk space (`df -h`) — build requires ~80GB free after cleanup
+
+Quick search for errors:
+```bash
+rg 'ERROR|FAILED|error:' --type sh    # error patterns in build scripts
+rg 'git am'                           # where patches are applied
+```
+
+### Updating Chromium Version
+
+1. `vanadium` submodule auto-updates via CI (fetches latest tag)
+2. After version bump, verify patches still apply cleanly locally
+3. Check that `sed` inline patches still match source (file paths and string literals can change)
+4. Update `vanadium/args.gn` version comment if needed
+
+### Modifying Build Flags
+
+Edit the `args.gn` heredoc inside `build.sh` (around line 82).
+Always document the trade-off in a comment:
+```
+# NOTE: <flag> set to <value> because <reason>. Trade-off: <size/speed/features impact>.
+```
+
+### Adding/Modifying CI Steps
+
+Edit `.github/workflows/build.yml`. Keep steps idempotent — the workflow can be re-run.
+- Pin action versions to a specific tag (e.g. `@v5`, `@v3`)
+- Use `|| true` on cleanup steps that may fail safely
+- Avoid caching directories >10 GB (GitHub Actions cache limit is 10 GB per repo)
+
+### Managing Disk Space
+
+The GitHub-hosted `ubuntu-latest` runner starts with ~25 GB free. After the free-disk-space action, ~60–70 GB should be available.
+
+To add more cleanup:
+```yaml
+remove_folders: "/path/to/add ..."   # space-separated, appended to existing list
+remove_packages: "pkg1 pkg2 ..."
+```
+
+---
+
+## Constraints and Safety Rules
+
+- **Never commit secrets.** Keys live in `keys/` (gitignored). Secrets flow through GitHub Actions env vars only.
+- **Never force-push to `master` or `main`.** These branches gate releases.
+- **Never skip CI hooks** (`--no-verify`, `--no-gpg-sign`) unless explicitly requested.
+- **Do not commit APKs or large binaries** — releases are published via GitHub Release assets.
+- **Do not modify signing logic** (`common.sh:set_keys`, `common.sh:sign_apk`) without explicit approval.
+- **Do not break the update step** in `build.yml` — it auto-commits submodule updates and pushes back to the branch.
+
+---
+
+## Debugging Quick Reference
+
+| Symptom | First check |
+|---------|-------------|
+| `git am` fails | Chromium version changed; patch needs rebase |
+| `autoninja` OOM | Reduce `-j` value; check available RAM |
+| Build >3h / timeout | Disable `use_thin_lto`; check `enable_precompiled_headers` |
+| APK signing fails | Verify secrets are correctly base64-encoded; check `keyAlias` matches |
+| `gclient sync` hangs | Network issue; check GitHub Actions runner connectivity |
+| Disk full mid-build | Add paths to `remove_folders` in free-disk-space step |
+
+---
 
 ## References
 
-- [Helium Browser](https://github.com/imputnet/helium)
-- [Vanadium](https://github.com/GrapheneOS/Vanadium)
-- [Chromium Build Documentation](https://chromium.googlesource.com/chromium/src/+/main/docs/)
-- [GN Build System](https://gn.googlesource.com/gn/)
+- [Helium](https://github.com/imputnet/helium) — Chromium fork with extension support
+- [Vanadium](https://github.com/GrapheneOS/Vanadium) — security-hardened Chromium for GrapheneOS
+- [Chromium Build Docs](https://chromium.googlesource.com/chromium/src/+/main/docs/android_build_instructions.md)
+- [GN Reference](https://gn.googlesource.com/gn/+/main/docs/reference.md)
+- [depot_tools](https://chromium.googlesource.com/chromium/tools/depot_tools)
