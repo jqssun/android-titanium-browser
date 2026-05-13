@@ -15,14 +15,13 @@ An experimental Chromium-based web browser for Android with extensions support, 
 
 ### Installing Extensions
 
-Navigate to [Chrome Web Store](https://chromewebstore.google.com/), then enable **Desktop site** by selecting the menu button <kbd>⋮</kbd> in the top right corner and ensure the option is checked. Select **Okay** and proceed as normal if prompted with:
-> The Chrome Web Store is only available on desktop.
- 
-Once you select **Add to Chrome**, [the extension will be installed in the background](https://support.google.com/chrome_webstore/answer/2664769) until the button changes to **Remove from Chrome**.
+Navigate to the [Chrome Web Store](https://chromewebstore.google.com/) and select **Add to Chrome** on any extension — just like desktop Chrome. No need to enable Desktop site mode or change any browser settings.
+
+The browser automatically presents a desktop User-Agent to the Chrome Web Store so the native install flow works out of the box. Once installation completes the **Add to Chrome** button changes to **Remove from Chrome**.
 
 ### Using Extensions
 
-To use [an extension's popup](https://developer.chrome.com/docs/extensions/develop/ui/add-popup), first open extensions menu, then select the menu button <kbd>⋮</kbd> next to the extension and select **Pin to toolbar**. Open the extension's popup using the extension's toolbar button.
+To use [an extension's popup](https://developer.chrome.com/docs/extensions/develop/ui/add-popup), open the extensions menu (puzzle-piece icon in the toolbar), then select the menu button <kbd>⋮</kbd> next to the extension and select **Pin to toolbar**. Open the extension's popup using the extension's toolbar button.
 
 ### Debug URLs
 
@@ -36,6 +35,18 @@ Consistent with both Helium and Vanadium, the option is available by selecting t
 
 > [!WARNING]
 > All builds are experimental, so unexpected issues may occur. [Helium Browser for Android](#helium-browser-for-android) only attempts to improve security and privacy where possible. For better protection on Android, you should instead use [GrapheneOS](https://grapheneos.org) with [Vanadium](https://vanadium.app), which additionally integrates patches into Android System WebView and provides significant kernel and memory management hardening on the OS level.
+
+### Desktop Extension Install — How It Works
+
+Four patches work together to make extension installs feel identical to desktop Chrome:
+
+| Patch | File | What it does |
+|---|---|---|
+| Desktop UA (HTTP) | `content/common/user_agent.cc` | Emits `(X11; Linux x86_64)` UA — removes `Android`/`Mobile` tokens so the CWS serves the desktop install page |
+| Desktop UA (Client Hints) | `components/embedder_support/user_agent_utils.cc` | Sets `Sec-CH-UA-Mobile: ?0` and platform to `Linux` so fetch-based CWS checks also pass |
+| Toolbar inflate | `ToolbarManager.java` | Inflates `extensions_toolbar_container_stub` at startup so the puzzle-piece icon appears in the phone toolbar without user action |
+| ExtensionsToolbarCoordinator | `ToolbarManager.java` | Promotes coordinator init out of the tablet-only branch so extension popups, badge counts, and context menus work on phone layouts |
+| CWS JS shim | `chrome/browser/resources/helium_cws_shim/` | Built-in component extension that overrides `navigator.userAgent` and `navigator.userAgentData.mobile` in the CWS page context and removes any "desktop only" interstitial dialogs |
 
 ```mermaid
 ---
