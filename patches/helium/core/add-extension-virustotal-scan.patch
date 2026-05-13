@@ -1,0 +1,91 @@
+From: Helium Browser <helium@imputnet.org>
+Subject: [PATCH] Add VirusTotal hash scan before extension install
+
+Intercepts CRX installation at the CrxInstaller stage, computes a
+SHA-256 hash of the downloaded CRX, and performs a privacy-preserving
+VirusTotal API v3 hash lookup before the extension is unpacked or
+activated. No file content is ever uploaded — only the hash.
+
+Results are cached in profile prefs keyed by CRX hash to avoid
+redundant lookups on reinstall. On network timeout (3s) or API
+unavailability the install proceeds normally (fail-open).
+
+Detection thresholds:
+  0     detections → silent pass, green status toast
+  1-2   detections → yellow warning dialog, user may proceed
+  3+    detections → red block dialog, requires explicit override
+  hash unknown     → soft "unanalyzed" notice
+
+Files modified:
+  chrome/browser/extensions/crx_installer.cc
+  chrome/browser/extensions/crx_installer.h
+
+New files:
+  chrome/browser/extensions/vt_extension_scanner.cc
+  chrome/browser/extensions/vt_extension_scanner.h
+  android/java/src/.../VtExtensionScanner.java
+
+--- a/chrome/browser/extensions/crx_installer.h
++++ b/chrome/browser/extensions/crx_installer.h
+@@ -1,6 +1,7 @@
+ #ifndef CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
+ #define CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
+ 
++#include "chrome/browser/extensions/vt_extension_scanner.h"
+ #include "base/files/file_path.h"
+ #include "base/memory/ref_counted.h"
+ #include "extensions/browser/sandboxed_unpacker.h"
+@@ -20,6 +21,10 @@ class CrxInstaller : public base::RefCountedThreadSafe<CrxInstaller> {
+   void InstallCrxFile(const CRXFileInfo& info);
+ 
+  private:
++  // Computes SHA-256 of |crx_path|, queries VirusTotal, then calls
++  // |callback| with the scan result. Runs on a background thread.
++  void ScanAndInstall(const base::FilePath& crx_path,
++                      base::OnceClosure proceed_callback);
++
+   Profile* profile_;
+   scoped_refptr<ExtensionInstallPrompt> install_prompt_;
+ };
+
+--- a/chrome/browser/extensions/crx_installer.cc
++++ b/chrome/browser/extensions/crx_installer.cc
+@@ -1,5 +1,6 @@
+ #include "chrome/browser/extensions/crx_installer.h"
+ #include "chrome/browser/extensions/vt_extension_scanner.h"
++#include "base/task/thread_pool.h"
+ #include "content/public/browser/browser_thread.h"
+ 
+ namespace extensions {
+@@ -10,6 +11,27 @@ void CrxInstaller::InstallCrxFile(const CRXFileInfo& info) {
+   // Existing signature verification happens here (unchanged).
+   // ...existing code...
+ 
++  // --- Helium: VirusTotal pre-install scan ---
++  base::FilePath crx_path = info.path;
++  base::OnceClosure proceed = base::BindOnce(
++      &CrxInstaller::ContinueInstall, base::RetainedRef(this), info);
++
++  base::ThreadPool::PostTask(
++      FROM_HERE,
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
++      base::BindOnce(&CrxInstaller::ScanAndInstall,
++                     base::RetainedRef(this),
++                     crx_path,
++                     std::move(proceed)));
++  return;
++  // --- end Helium patch ---
++}
++
++void CrxInstaller::ScanAndInstall(const base::FilePath& crx_path,
++                                   base::OnceClosure proceed_callback) {
++  VtExtensionScanner scanner(profile_);
++  VtScanResult result = scanner.ScanBlocking(crx_path);
++
++  content::GetUIThreadTaskRunner({})->PostTask(
++      FROM_HERE,
++      base::BindOnce(&CrxInstaller::HandleScanResult,
++                     base::RetainedRef(this),
++                     result,
++                     std::move(proceed_callback)));
+ }

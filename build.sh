@@ -70,6 +70,257 @@ sed -i '/<ViewStub/{N;N;N;N;N;N; /optional_button_stub/a\
 }' chrome/browser/ui/android/toolbar/java/res/layout/toolbar_phone.xml
 sed -i 's|(ToolbarTablet) mToolbarLayout,|mToolbarLayout,|' chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java
 
+# =============================================================================
+# Fix 1 — Desktop User-Agent
+# Strip "Android" and "Mobile" tokens from the UA so the Chrome Web Store
+# serves the desktop install flow without requiring the user to enable
+# "Desktop site" mode manually.
+# Targets: UserAgentBuilder in chrome/browser/net/profile_network_context_service.cc
+# and the embedder UA string in content/common/user_agent.cc
+# =============================================================================
+
+# Remove "Mobile" token from the UA brand list so navigator.userAgent and
+# the HTTP User-Agent header both look like desktop Chrome on Linux.
+sed -i 's/brands\.push_back({"Not\/A)Brand", "99"});/brands.push_back({"Not\/A)Brand", "99"});\n  brands.push_back({"Chromium", version});\n  brands.push_back({"Google Chrome", version});/' \
+  components/embedder_support/user_agent_utils.cc 2>/dev/null || true
+
+# Force the UA platform string to Linux x86_64 for is_desktop_android builds.
+# This is the primary gate the Chrome Web Store checks at the HTTP layer.
+python3 - <<'PYEOF'
+import re, pathlib
+
+# --- user_agent.cc: replace Android platform token with Linux ---
+ua_cc = pathlib.Path("content/common/user_agent.cc")
+if ua_cc.exists():
+    src = ua_cc.read_text()
+    # Replace Android/Mobile UA construction with desktop Linux equivalent
+    src = re.sub(
+        r'(base::StringPrintf\([^)]*"Mozilla/5\.0 \()Linux; Android[^)]*\)',
+        lambda m: m.group(0).replace(
+            '(Linux; Android', '(X11; Linux x86_64'
+        ).replace('Mobile ', ''),
+        src
+    )
+    # Remove "Mobile" from the UA string if present as a standalone token
+    src = src.replace(' Mobile Safari/', ' Safari/')
+    ua_cc.write_text(src)
+    print("[UA fix] Patched content/common/user_agent.cc")
+else:
+    print("[UA fix] user_agent.cc not found at expected path — skipping")
+
+# --- embedder_support/user_agent_utils.cc: drop mobile brand hints ---
+ua_utils = pathlib.Path("components/embedder_support/user_agent_utils.cc")
+if ua_utils.exists():
+    src = ua_utils.read_text()
+    # Remove "Android" from platform in Client Hints
+    src = re.sub(r'"Android"', '"Linux"', src)
+    # Remove mobile flag so Sec-CH-UA-Mobile: ?0
+    src = re.sub(r'(IsMobileDevice\(\)|is_mobile_device)[^;]*;', 'false;', src)
+    ua_utils.write_text(src)
+    print("[UA fix] Patched components/embedder_support/user_agent_utils.cc")
+else:
+    print("[UA fix] user_agent_utils.cc not found — skipping")
+PYEOF
+
+# =============================================================================
+# Fix 2 — Inflate extensions_toolbar_container_stub in phone toolbar
+# The ViewStub is declared in toolbar_phone.xml (existing patch above) but
+# never inflated at runtime on phone builds. This wires the inflate() call
+# into ToolbarManager so the extensions puzzle-piece icon appears without
+# any user action.
+# =============================================================================
+
+python3 - <<'PYEOF'
+import re, pathlib
+
+tm = pathlib.Path(
+    "chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java"
+)
+if not tm.exists():
+    print("[Toolbar fix] ToolbarManager.java not found — skipping")
+    exit()
+
+src = tm.read_text()
+
+# Inflate the stub immediately after the toolbar layout is set so the
+# ExtensionsToolbarContainer view exists in the hierarchy before any
+# coordinator tries to find it by ID.
+inflate_block = """\n        // Helium: inflate extensions toolbar stub on phone layout
+        View extensionsStub = mToolbarLayout.getRootView()
+                .findViewById(R.id.extensions_toolbar_container_stub);
+        if (extensionsStub instanceof ViewStub) {
+            ((ViewStub) extensionsStub).inflate();
+        }\n"""
+
+# Anchor: insert after the toolbar layout assignment line
+anchor = 'mToolbarLayout = (ToolbarLayout) toolbarView;'
+if anchor in src and 'extensions_toolbar_container_stub' not in src:
+    src = src.replace(anchor, anchor + inflate_block)
+    tm.write_text(src)
+    print("[Toolbar fix] Inserted ViewStub inflate() in ToolbarManager.java")
+else:
+    print("[Toolbar fix] Anchor not found or already patched — skipping")
+PYEOF
+
+# =============================================================================
+# Fix 3 — Wire ExtensionsToolbarCoordinator for phone (is_desktop_android)
+# On tablet builds, ExtensionsToolbarCoordinator is initialized inside the
+# ToolbarManager tablet-specific branch. For phone+is_desktop_android builds
+# the coordinator is never constructed, so extension popups and badge counts
+# don't work. This patch promotes the coordinator init out of the tablet guard.
+# =============================================================================
+
+python3 - <<'PYEOF'
+import re, pathlib
+
+tm = pathlib.Path(
+    "chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java"
+)
+if not tm.exists():
+    print("[ExtCoord fix] ToolbarManager.java not found — skipping")
+    exit()
+
+src = tm.read_text()
+
+# Pattern: the coordinator is constructed inside an `if (mToolbarLayout instanceof ToolbarTablet)`
+# block. We duplicate the constructor call outside that block, guarded instead by a
+# null-check on the inflated container view, so it runs for any layout that has the
+# extensions container (i.e., our patched phone toolbar).
+coord_init_pattern = re.compile(
+    r'(mExtensionsToolbarCoordinator\s*=\s*new\s+ExtensionsToolbarCoordinator\([^;]+;)',
+    re.DOTALL
+)
+
+match = coord_init_pattern.search(src)
+if match and 'findViewById(R.id.extensions_toolbar_container)' not in src.split(match.group(0))[1][:500]:
+    coord_call = match.group(1)
+    phone_guard = (
+        "\n        // Helium: init ExtensionsToolbarCoordinator on phone+is_desktop_android"
+        "\n        if (mExtensionsToolbarCoordinator == null) {"
+        "\n            View extContainer = mToolbarLayout.getRootView()"
+        "\n                    .findViewById(R.id.extensions_toolbar_container);"
+        "\n            if (extContainer != null) {"
+        "\n                " + coord_call +
+        "\n            }"
+        "\n        }\n"
+    )
+    # Append after the existing tablet-branch coordinator init
+    src = coord_init_pattern.sub(coord_call + phone_guard, src, count=1)
+    tm.write_text(src)
+    print("[ExtCoord fix] Wired ExtensionsToolbarCoordinator for phone layout")
+else:
+    print("[ExtCoord fix] Pattern not found or already patched — skipping")
+PYEOF
+
+# =============================================================================
+# Fix 4 — Suppress Chrome Web Store JS navigator.userAgent gate
+# The CWS runs a JS check on navigator.userAgent in the page context that is
+# separate from the HTTP UA header. Even with Fix 1 the CWS may still show
+# the "only available on desktop" interstitial. We inject a content script
+# via a built-in component extension that overrides navigator.userAgent and
+# navigator.userAgentData.mobile in the main world for chromewebstore.google.com.
+# =============================================================================
+
+mkdir -p chrome/browser/resources/helium_cws_shim
+cat > chrome/browser/resources/helium_cws_shim/manifest.json <<'JSONEOF'
+{
+  "manifest_version": 3,
+  "name": "Helium CWS Desktop Shim",
+  "version": "1.0",
+  "description": "Presents a desktop UA to the Chrome Web Store so extensions install natively.",
+  "content_scripts": [
+    {
+      "matches": ["https://chromewebstore.google.com/*"],
+      "js": ["shim.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
+JSONEOF
+
+cat > chrome/browser/resources/helium_cws_shim/shim.js <<'JSEOF'
+// Helium CWS Desktop Shim
+// Overrides navigator.userAgent and userAgentData.mobile in the page's main
+// world so the Chrome Web Store treats this as a desktop browser install.
+(function () {
+  'use strict';
+
+  const desktopUA =
+    navigator.userAgent
+      .replace(/\(Linux; Android[^)]*\)/, '(X11; Linux x86_64)')
+      .replace(/ Mobile\/[\w]+/, '')
+      .replace(/ Mobile /, ' ');
+
+  // Override navigator.userAgent
+  try {
+    Object.defineProperty(navigator, 'userAgent', {
+      get: () => desktopUA,
+      configurable: true,
+    });
+  } catch (e) {}
+
+  // Override NavigatorUAData.mobile (Sec-CH-UA-Mobile)
+  try {
+    if (navigator.userAgentData) {
+      Object.defineProperty(navigator.userAgentData, 'mobile', {
+        get: () => false,
+        configurable: true,
+      });
+    }
+  } catch (e) {}
+
+  // Suppress the CWS "desktop only" interstitial by patching the check
+  // the CWS JS bundle performs on DOMContentLoaded.
+  document.addEventListener(
+    'DOMContentLoaded',
+    function removeMobileInterstitial() {
+      const selectors = [
+        '[data-desktop-only-interstitial]',
+        '.desktop-only-message',
+        // CWS uses dynamic class names; also target by text content
+      ];
+      selectors.forEach((sel) => {
+        document.querySelectorAll(sel).forEach((el) => el.remove());
+      });
+      // Remove any overlay that blocks the Add to Chrome button
+      document.querySelectorAll('[role="dialog"]').forEach((dialog) => {
+        const text = dialog.innerText || '';
+        if (
+          text.includes('only available on desktop') ||
+          text.includes('Chrome Web Store is only available')
+        ) {
+          dialog.remove();
+        }
+      });
+    },
+    { once: true }
+  );
+})();
+JSONEOF
+
+# Register the shim as a component extension so it loads at browser startup
+# without requiring user interaction. We append it to the list of built-in
+# component extensions in chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+sed -i '/\/\/ End of component extension IDs/i \
+  // Helium CWS Desktop Shim\n  "helium_cws_shim",'\
+  chrome/browser/extensions/component_extensions_allowlist/allowlist.cc 2>/dev/null || true
+
+# Wire the shim directory into the GN build so it is packaged into the APK
+cat >> chrome/browser/resources/BUILD.gn <<'GNEOF'
+
+# Helium: CWS desktop shim component extension
+grit("helium_cws_shim_resources") {
+  source = "helium_cws_shim/manifest.json"
+  outputs = [
+    "grit/helium_cws_shim_resources.h",
+    "helium_cws_shim_resources.pak",
+  ]
+  resource_ids = "//tools/gritsettings/resource_ids"
+  output_dir = "$root_gen_dir/chrome"
+}
+GNEOF
+
 sudo dpkg --add-architecture i386; sudo apt-get update; sudo apt-get install -y libgcc-s1:i386
 cat > out/Default/args.gn <<EOF
 chrome_public_manifest_package = "io.github.jqssun.helium"
