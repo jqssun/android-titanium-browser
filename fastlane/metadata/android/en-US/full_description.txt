@@ -1,13 +1,13 @@
-A secure and fully open-source, Chromium-based web browser with support for extensions. Manifest V2 (MV2) extensions are supported. To maintain a fast and native experience for everyone, advanced features are modularized into Helium Extension for Android.
+A secure and fully open-source, Chromium-based web browser with support for extensions. Manifest V2 (MV2) extensions are supported. To maintain a fast and native experience for everyone, advanced features are modularized into Titanium Extension for Android.
 
 Installing Extensions
 - For Chrome extensions, open the Chrome Web Store, enable "Desktop site" from the menu, and proceed as normal.
-- For Opera addons, Microsoft Edge extensions, or other marketplaces, targeted User Agent modifications may be required. See Helium Extension for Android for instructions.
+- For Opera Add-ons, Microsoft Edge Add-ons, or other marketplaces, targeted User Agent modifications may be required. See Titanium Extension for Android for instructions.
 - You can also load an unpacked extension by navigating to the "Manage extensions" page or "chrome://extensions". Enable "Developer mode", select "Load unpacked", and choose the folder containing the extension.
 
 Using Extensions
 - To run an extension in Incognito (OTR) mode, go to "Manage extensions", find the extension, select "Details", and turn on "Allow in Incognito".
-- For advanced features including external download manager support, enhanced dark mode, and additional privacy options, use Helium Extension for Android.
+- For advanced features including external download manager support, enhanced dark mode, and additional privacy options, use Titanium Extension for Android.
 
 Debug URLs
 - To view and access them, use "chrome://chrome-urls". For "Experiments", use "chrome://flags".
@@ -15,6 +15,6 @@ Debug URLs
 WebRTC IP Policy
 - Available under "Privacy and security" in Settings. If you experience issues with WebRTC due to IPs being shielded by default, try changing it to "Default public interface only", or "Default".
 
-Helium Extension for Android is available at https://github.com/jqssun/android-helium-extension
+Titanium Extension for Android is available at https://github.com/jqssun/android-titanium-extension
 
-Helium Browser for Android is under the GPL-2.0 license at https://github.com/jqssun/android-helium-browser
+Titanium Browser for Android is under the GPL-2.0 license at https://github.com/jqssun/android-titanium-browser

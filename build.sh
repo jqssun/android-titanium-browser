@@ -23,20 +23,14 @@ rm -rf $SCRIPT_DIR/vanadium/patches/*{detailed,supported}-language*.patch
 rm -rf $SCRIPT_DIR/vanadium/patches/*component-updates.patch
 rm -rf $SCRIPT_DIR/vanadium/patches/*{pdf,PDF,for-content-public}*.patch
 # rm -rf $SCRIPT_DIR/vanadium/patches/*crashpad*.patch
-replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "HELIUM"
-replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Helium"
-replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "helium"
+replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "TITANIUM"
+replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Titanium"
+replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "titanium"
 git am --whitespace=nowarn --keep-non-patch $SCRIPT_DIR/vanadium/patches/*.patch
 
 gclient sync -D --no-history --nohooks
 gclient runhooks
 ./build/install-build-deps.sh --no-prompt
-
-# https://github.com/imputnet/helium-linux/blob/main/scripts/shared.sh
-# python3 "${SCRIPT_DIR}/helium/utils/name_substitution.py" --sub -t .
-# python3 "${SCRIPT_DIR}/helium/utils/helium_version.py" --tree "${SCRIPT_DIR}/helium" --chromium-tree .
-# python3 "${SCRIPT_DIR}/helium/utils/generate_resources.py" "${SCRIPT_DIR}/helium/resources/generate_resources.txt" "${SCRIPT_DIR}/helium/resources"
-# python3 "${SCRIPT_DIR}/helium/utils/replace_resources.py" "${SCRIPT_DIR}/helium/resources/helium_resources.txt" "${SCRIPT_DIR}/helium/resources" .
 
 source $SCRIPT_DIR/patch.sh
 cp $SCRIPT_DIR/args.gn out/Default/args.gn

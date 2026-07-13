@@ -19,7 +19,7 @@ hooks = [
     'action': ['python3',
               '../vanadium/tools/filter_lists/filter_list_download.py',
               '--output',
-              'src/helium/android_config/filter_lists/filter_lists_easylist.txt',
+              'src/titanium/android_config/filter_lists/filter_lists_easylist.txt',
               '--urls',
               'https://easylist-downloads.adblockplus.org/antiadblockfilters.txt',
               'https://easylist.to/easylist/easylist.txt',

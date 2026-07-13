@@ -5,7 +5,7 @@ body:
     attributes:
       value: |
         ### Important
-        Before reporting a new issue, please check if it already exists [upstream](https://crbug.com/) or in the [issue tracker](https://github.com/jqssun/android-helium-browser/issues).
+        Before reporting a new issue, please check if it already exists [upstream](https://crbug.com/) or in the [issue tracker](https://github.com/jqssun/android-titanium-browser/issues).
         
         We aim to keep things lightweight. The scope of accepted bugs is limited to current patches. If a feature can be achieved via an extension or a user script, please refrain from opening a report.
 
