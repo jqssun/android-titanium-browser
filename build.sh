@@ -1,6 +1,11 @@
 #!/bin/bash
 source common.sh
 set_keys
+
+# Fail loudly instead of silently shipping a mobile-UA / no-extensions APK when
+# an upstream Chromium anchor no longer matches.
+set -o pipefail
+die() { echo "[build.sh] FATAL: $*" >&2; exit 1; }
 export VERSION=$(grep -m1 -o '[0-9]\+\(\.[0-9]\+\)\{3\}' vanadium/args.gn)
 export CHROMIUM_SOURCE=https://chromium.googlesource.com/chromium/src.git # https://github.com/chromium/chromium.git
 export DEBIAN_FRONTEND=noninteractive
@@ -70,6 +75,12 @@ sed -i '/<ViewStub/{N;N;N;N;N;N; /optional_button_stub/a\
 }' chrome/browser/ui/android/toolbar/java/res/layout/toolbar_phone.xml
 sed -i 's|(ToolbarTablet) mToolbarLayout,|mToolbarLayout,|' chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java
 
+# Verify the phone-toolbar ViewStub injection actually landed; otherwise the
+# extensions puzzle-piece icon can never appear and the build should abort.
+grep -q 'extensions_toolbar_container_stub' \
+  chrome/browser/ui/android/toolbar/java/res/layout/toolbar_phone.xml \
+  || die "toolbar_phone.xml ViewStub injection failed — Chromium layout changed"
+
 # =============================================================================
 # Fix 1 — Desktop User-Agent
 # Strip "Android" and "Mobile" tokens from the UA so the Chrome Web Store
@@ -81,19 +92,32 @@ sed -i 's|(ToolbarTablet) mToolbarLayout,|mToolbarLayout,|' chrome/android/java/
 
 # Remove "Mobile" token from the UA brand list so navigator.userAgent and
 # the HTTP User-Agent header both look like desktop Chrome on Linux.
-sed -i 's/brands\.push_back({"Not\/A)Brand", "99"});/brands.push_back({"Not\/A)Brand", "99"});\n  brands.push_back({"Chromium", version});\n  brands.push_back({"Google Chrome", version});/' \
-  components/embedder_support/user_agent_utils.cc 2>/dev/null || true
+[ -f components/embedder_support/user_agent_utils.cc ] \
+  || die "components/embedder_support/user_agent_utils.cc missing — Chromium layout changed"
+if grep -q 'brands.push_back({"Chromium", version});' components/embedder_support/user_agent_utils.cc; then
+  echo "[UA brands] already applied — skipping"
+elif grep -q 'brands.push_back({"Not/A)Brand", "99"});' components/embedder_support/user_agent_utils.cc; then
+  sed -i 's/brands\.push_back({"Not\/A)Brand", "99"});/brands.push_back({"Not\/A)Brand", "99"});\n  brands.push_back({"Chromium", version});\n  brands.push_back({"Google Chrome", version});/' \
+    components/embedder_support/user_agent_utils.cc
+else
+  die "UA brand anchor not found in user_agent_utils.cc — Chromium changed"
+fi
 
 # Force the UA platform string to Linux x86_64 for is_desktop_android builds.
 # This is the primary gate the Chrome Web Store checks at the HTTP layer.
-python3 - <<'PYEOF'
-import re, pathlib
+python3 - <<'PYEOF' || die "Fix 1 (desktop User-Agent) failed"
+import re, pathlib, sys
 
 # --- user_agent.cc: replace Android platform token with Linux ---
+# This is the primary HTTP-layer gate the Chrome Web Store checks, so a genuine
+# miss here MUST abort the build rather than silently ship a mobile UA.
 ua_cc = pathlib.Path("content/common/user_agent.cc")
-if ua_cc.exists():
-    src = ua_cc.read_text()
-    # Replace Android/Mobile UA construction with desktop Linux equivalent
+if not ua_cc.exists():
+    sys.exit("[UA fix] FATAL: content/common/user_agent.cc not found — Chromium layout changed")
+src = ua_cc.read_text()
+if "(X11; Linux x86_64" in src:
+    print("[UA fix] user_agent.cc already patched — skipping")
+else:
     src = re.sub(
         r'(base::StringPrintf\([^)]*"Mozilla/5\.0 \()Linux; Android[^)]*\)',
         lambda m: m.group(0).replace(
@@ -101,25 +125,23 @@ if ua_cc.exists():
         ).replace('Mobile ', ''),
         src
     )
-    # Remove "Mobile" from the UA string if present as a standalone token
     src = src.replace(' Mobile Safari/', ' Safari/')
+    if "(X11; Linux x86_64" not in src:
+        sys.exit("[UA fix] FATAL: platform-token anchor not found in user_agent.cc — Chromium changed")
     ua_cc.write_text(src)
     print("[UA fix] Patched content/common/user_agent.cc")
-else:
-    print("[UA fix] user_agent.cc not found at expected path — skipping")
 
 # --- embedder_support/user_agent_utils.cc: drop mobile brand hints ---
 ua_utils = pathlib.Path("components/embedder_support/user_agent_utils.cc")
-if ua_utils.exists():
-    src = ua_utils.read_text()
-    # Remove "Android" from platform in Client Hints
-    src = re.sub(r'"Android"', '"Linux"', src)
-    # Remove mobile flag so Sec-CH-UA-Mobile: ?0
-    src = re.sub(r'(IsMobileDevice\(\)|is_mobile_device)[^;]*;', 'false;', src)
-    ua_utils.write_text(src)
-    print("[UA fix] Patched components/embedder_support/user_agent_utils.cc")
-else:
-    print("[UA fix] user_agent_utils.cc not found — skipping")
+if not ua_utils.exists():
+    sys.exit("[UA fix] FATAL: components/embedder_support/user_agent_utils.cc not found — Chromium changed")
+src = ua_utils.read_text()
+new = re.sub(r'"Android"', '"Linux"', src)
+new = re.sub(r'(IsMobileDevice\(\)|is_mobile_device)[^;]*;', 'false;', new)
+if new == src:
+    sys.exit("[UA fix] FATAL: no Client-Hints mobile anchors matched in user_agent_utils.cc — Chromium changed")
+ua_utils.write_text(new)
+print("[UA fix] Patched components/embedder_support/user_agent_utils.cc")
 PYEOF
 
 # =============================================================================
@@ -130,15 +152,14 @@ PYEOF
 # any user action.
 # =============================================================================
 
-python3 - <<'PYEOF'
-import re, pathlib
+python3 - <<'PYEOF' || die "Fix 2 (toolbar stub inflate) failed"
+import re, pathlib, sys
 
 tm = pathlib.Path(
     "chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java"
 )
 if not tm.exists():
-    print("[Toolbar fix] ToolbarManager.java not found — skipping")
-    exit()
+    sys.exit("[Toolbar fix] FATAL: ToolbarManager.java not found — Chromium changed")
 
 src = tm.read_text()
 
@@ -152,14 +173,15 @@ inflate_block = """\n        // Helium: inflate extensions toolbar stub on phone
             ((ViewStub) extensionsStub).inflate();
         }\n"""
 
-# Anchor: insert after the toolbar layout assignment line
 anchor = 'mToolbarLayout = (ToolbarLayout) toolbarView;'
-if anchor in src and 'extensions_toolbar_container_stub' not in src:
+if 'extensions_toolbar_container_stub' in src:
+    print("[Toolbar fix] already applied — skipping")
+elif anchor in src:
     src = src.replace(anchor, anchor + inflate_block)
     tm.write_text(src)
     print("[Toolbar fix] Inserted ViewStub inflate() in ToolbarManager.java")
 else:
-    print("[Toolbar fix] Anchor not found or already patched — skipping")
+    sys.exit("[Toolbar fix] FATAL: anchor 'mToolbarLayout = (ToolbarLayout) toolbarView;' not found — Chromium changed")
 PYEOF
 
 # =============================================================================
@@ -170,15 +192,14 @@ PYEOF
 # don't work. This patch promotes the coordinator init out of the tablet guard.
 # =============================================================================
 
-python3 - <<'PYEOF'
-import re, pathlib
+python3 - <<'PYEOF' || die "Fix 3 (ExtensionsToolbarCoordinator phone wiring) failed"
+import re, pathlib, sys
 
 tm = pathlib.Path(
     "chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java"
 )
 if not tm.exists():
-    print("[ExtCoord fix] ToolbarManager.java not found — skipping")
-    exit()
+    sys.exit("[ExtCoord fix] FATAL: ToolbarManager.java not found — Chromium changed")
 
 src = tm.read_text()
 
@@ -186,16 +207,21 @@ src = tm.read_text()
 # block. We duplicate the constructor call outside that block, guarded instead by a
 # null-check on the inflated container view, so it runs for any layout that has the
 # extensions container (i.e., our patched phone toolbar).
+marker = "init ExtensionsToolbarCoordinator on phone+is_desktop_android"
 coord_init_pattern = re.compile(
     r'(mExtensionsToolbarCoordinator\s*=\s*new\s+ExtensionsToolbarCoordinator\([^;]+;)',
     re.DOTALL
 )
 
-match = coord_init_pattern.search(src)
-if match and 'findViewById(R.id.extensions_toolbar_container)' not in src.split(match.group(0))[1][:500]:
+if marker in src:
+    print("[ExtCoord fix] already applied — skipping")
+else:
+    match = coord_init_pattern.search(src)
+    if not match:
+        sys.exit("[ExtCoord fix] FATAL: ExtensionsToolbarCoordinator init not found — Chromium changed")
     coord_call = match.group(1)
     phone_guard = (
-        "\n        // Helium: init ExtensionsToolbarCoordinator on phone+is_desktop_android"
+        "\n        // Helium: " + marker +
         "\n        if (mExtensionsToolbarCoordinator == null) {"
         "\n            View extContainer = mToolbarLayout.getRootView()"
         "\n                    .findViewById(R.id.extensions_toolbar_container);"
@@ -204,12 +230,9 @@ if match and 'findViewById(R.id.extensions_toolbar_container)' not in src.split(
         "\n            }"
         "\n        }\n"
     )
-    # Append after the existing tablet-branch coordinator init
     src = coord_init_pattern.sub(coord_call + phone_guard, src, count=1)
     tm.write_text(src)
     print("[ExtCoord fix] Wired ExtensionsToolbarCoordinator for phone layout")
-else:
-    print("[ExtCoord fix] Pattern not found or already patched — skipping")
 PYEOF
 
 # =============================================================================
@@ -297,14 +320,21 @@ cat > chrome/browser/resources/helium_cws_shim/shim.js <<'JSEOF'
     { once: true }
   );
 })();
-JSONEOF
+JSEOF
 
 # Register the shim as a component extension so it loads at browser startup
 # without requiring user interaction. We append it to the list of built-in
 # component extensions in chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
-sed -i '/\/\/ End of component extension IDs/i \
-  // Helium CWS Desktop Shim\n  "helium_cws_shim",'\
-  chrome/browser/extensions/component_extensions_allowlist/allowlist.cc 2>/dev/null || true
+ALLOWLIST=chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+[ -f "$ALLOWLIST" ] || die "$ALLOWLIST missing — cannot register CWS shim component extension"
+if grep -q 'helium_cws_shim' "$ALLOWLIST"; then
+  echo "[CWS shim] allowlist already patched — skipping"
+elif grep -q '// End of component extension IDs' "$ALLOWLIST"; then
+  sed -i '/\/\/ End of component extension IDs/i \
+  // Helium CWS Desktop Shim\n  "helium_cws_shim",' "$ALLOWLIST"
+else
+  die "allowlist anchor '// End of component extension IDs' not found — Chromium changed"
+fi
 
 # Wire the shim directory into the GN build so it is packaged into the APK
 cat >> chrome/browser/resources/BUILD.gn <<'GNEOF'
