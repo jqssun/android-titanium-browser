@@ -2,12 +2,6 @@ name: Build
 
 on:
   workflow_dispatch:
-    inputs:
-      runner:
-        description: 'Runner'
-        required: true
-        type: string
-        default: 'self-hosted' # ubuntu-latest
   schedule:
     - cron: '0 0 */16 * *'
 
@@ -18,13 +12,13 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner || 'self-hosted' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: true
       
-      - name: Update 
+      - name: Update
         run: |
           cd vanadium
           git fetch --tags
@@ -39,15 +33,15 @@ jobs:
           fi
 
       - name: Set ENV
-        run: | 
+        run: |
           chmod +x *.sh
           echo "unix_time=$(date +%s)" >> $GITHUB_ENV
     
       - name: Build
         env:
-            DEBIAN_FRONTEND: noninteractive
-            LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
-            STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
+          DEBIAN_FRONTEND: noninteractive
+          LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
+          STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
         run: |
           ./build.sh
 
@@ -75,5 +69,5 @@ jobs:
         with:
           subject-path: |
             ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.aab
-            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.apk
             ${{ env.VERSION }}-${{ env.unix_time }}-armeabi-v7a.apk
+            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.apk
