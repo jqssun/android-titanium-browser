@@ -41,7 +41,9 @@ feature_overrides.EnableFeature(media::kAndroidEnableBackgroundMediaCapturing);\
 feature_overrides.EnableFeature(media::kAutoPictureInPictureAndroid);\
 feature_overrides.EnableFeature(media::kContextMenuPictureInPictureAndroid);\
 feature_overrides.EnableFeature(chrome::android::kLoadAllTabsAtStartup);\
-feature_overrides.EnableFeature(chrome::android::kChromeNativeUrlOverriding);\
+feature_overrides.EnableFeature(chrome::android::kChromeNativeUrlOverriding);
+// Immersive status-bar fix: use Chromium's modern fullscreen WindowInsets path.
+feature_overrides.EnableFeature(chrome::android::kFullscreenInsetsApiMigration);\
 #if 0
 d}' chrome/browser/chrome_browser_field_trials.cc
 sed -i '/^bool ShouldFallbackToSWIfGLES3NotSupported() {$/,/^}$/ s|^  return true;$|  return false;|' ui/gl/gl_features.cc # virt
