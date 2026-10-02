@@ -52,7 +52,7 @@ jobs:
           for apk in "$GITHUB_WORKSPACE"/chromium/src/out/tmp/*-arm64-v8a.apk "$GITHUB_WORKSPACE"/chromium/src/out/tmp/*-armeabi-v7a.apk; do
             if [ -f "$apk" ]; then
               name=$(basename "$apk")
-              "$APK_SIGNER" sign --ks "$RUNNER_TEMP/test.jks" --ks-pass pass:android --key-pass pass:android --ks-key-alias androidtest --out "$GITHUB_WORKSPACE/test-release/$name" "$apk"
+              "$APK_SIGNER" sign --ks "$RUNNER_TEMP/test.jks" --ks-pass pass:android --key-pass pass:android --ks-key-alias androidtest --in "$apk" --out "$GITHUB_WORKSPACE/test-release/$name"
             fi
           done
 
