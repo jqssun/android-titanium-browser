@@ -24,7 +24,6 @@ google_default_client_secret = "x"
 use_siso = true
 android_static_analysis = "off"
 treat_warnings_as_errors = false
-is_java_debug = true
 use_login_database_as_backend = true
 build_contextual_search = false
 dcheck_always_on = false
