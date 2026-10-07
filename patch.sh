@@ -199,7 +199,9 @@ sed -i '/    \/\*\* Allows clients to listen for updates to the scroll changes o
             }\
         }\
         // A minimum height keeps taller content scrollable in landscape and split screen.\
-        mNewTabPageLayout.setMinimumHeight(minimumHeight);\
+        if (mNewTabPageLayout.getMinimumHeight() != minimumHeight) {\
+            mNewTabPageLayout.setMinimumHeight(minimumHeight);\
+        }\
         mNewTabPageLayout.setGravity(\
                 Gravity.CENTER_HORIZONTAL\
                         | (minimumHeight > 0 ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL));\
