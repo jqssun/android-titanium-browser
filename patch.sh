@@ -149,6 +149,68 @@ fi
 # ext: app
 sed -i 's|^  "app": {$|&\n    "platforms": ["chromeos", "linux", "mac", "win"],|' chrome/common/extensions/api/_api_features.json
 
+# bottom: toolbar
+# Keep the configured position on the NTP and while editing; Chromium handles keyboard insets.
+sed -i '/        if (ntpShowing$/,/            newControlsPosition = ControlsPosition.TOP;/{s/if (ntpShowing/if (tabSwitcherShowing/; /|| tabSwitcherShowing$/d; /|| isOmniboxFocused$/d;}' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+# Refresh offsets even when focus changes while the keyboard is already visible.
+sed -i '/    private final Callback<Boolean> mFormFieldViewOffsetCallback;/a\    private final Callback<Boolean> mOmniboxViewOffsetCallback;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mKeyboardVisibilityViewOffsetCallback =$/i\        mOmniboxViewOffsetCallback =\
+                (focused) -> {\
+                    updateViewOffset(mBottomToolbarLayer, mControlContainer.getView());\
+                    updateViewOffset(mProgressBarLayer, mToolbarProgressBarContainer);\
+                };' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mIsFormFieldFocusedSupplier.addSyncObserverAndPostIfNonNull(mFormFieldViewOffsetCallback);/a\        mIsOmniboxFocusedSupplier.addSyncObserverAndPostIfNonNull(mOmniboxViewOffsetCallback);' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mIsFormFieldFocusedSupplier.removeObserver(mFormFieldViewOffsetCallback);/a\        mIsOmniboxFocusedSupplier.removeObserver(mOmniboxViewOffsetCallback);' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        if (mIsOmniboxFocusedSupplier.get() \&\& mCurrentPosition.get() == ControlsPosition.BOTTOM) {/a\            if (mControlContainer.getView().getRootWindowInsets() == null) return;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+
+# bottom: ntp
+sed -i '/import android.view.LayoutInflater;/i\import android.view.Gravity;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;/a\import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/import org.chromium.chrome.browser.toolbar.top.Toolbar;/i\import org.chromium.chrome.browser.toolbar.ToolbarPositionController;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/    public static boolean isInSingleUrlBarMode(boolean isLff) {/,/^    }/s/return !isLff;/return !isLff\n                \&\& (DeviceInfo.isAutomotive()\n                        || ToolbarPositionController.shouldShowToolbarOnTop(null));/' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/private final CallbackController mCallbackController = new CallbackController();/a\    private final View.OnLayoutChangeListener mToolbarPositionLayoutListener =\
+            (v, l, t, r, b, ol, ot, or, ob) -> updateToolbarPosition();' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        view.addOnAttachStateChangeListener(/i\        view.addOnLayoutChangeListener(mToolbarPositionLayoutListener);' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        sTotalCount++;/i\        updateToolbarPosition();\
+' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/    \/\*\* Allows clients to listen for updates to the scroll changes of the search box on the NTP. \*\//i\
+    @Override\
+    public void onControlsPositionChanged(@ControlsPosition int controlsPosition) {\
+        updateToolbarPosition();\
+        updateMargins();\
+    }\
+\
+    private void updateToolbarPosition() {\
+        boolean bottomToolbar = !mIsLff \&\& !isInSingleUrlBarMode();\
+        int minimumHeight = 0;\
+        if (bottomToolbar \&\& mFeedSurfaceProvider instanceof FeedSurfaceCoordinator coordinator) {\
+            RecyclerView recyclerView = coordinator.getRecyclerView();\
+            // Fill the viewport only when the NTP header is the sole item, without a feed.\
+            if (recyclerView.getAdapter() != null\
+                    \&\& recyclerView.getAdapter().getItemCount() == 1) {\
+                minimumHeight =\
+                        Math.max(\
+                                0,\
+                                recyclerView.getHeight()\
+                                        - recyclerView.getPaddingTop()\
+                                        - recyclerView.getPaddingBottom());\
+            }\
+        }\
+        // A minimum height keeps taller content scrollable in landscape and split screen.\
+        mNewTabPageLayout.setMinimumHeight(minimumHeight);\
+        mNewTabPageLayout.setGravity(\
+                Gravity.CENTER_HORIZONTAL\
+                        | (minimumHeight > 0 ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL));\
+    }\
+
+' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/    private int getToolbarExtraYOffset() {/,/^    }/s/- mToolbarHeight/- (mBrowserControlsStateProvider.getControlsPosition() == ControlsPosition.TOP\n                        ? mToolbarHeight : 0)/' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        mNewTabPageCoordinator.destroy();/i\        getView().removeOnLayoutChangeListener(mToolbarPositionLayoutListener);' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+
+# bottom: move the NTP search box below the shortcuts
+sed -i '/^    <!-- Search box -->$/,/^$/d' chrome/android/java/res/layout/new_tab_page_layout.xml
+sed -i 's|^</org.chromium.chrome.browser.ntp.NewTabPageLayout>$|    <!-- Search box -->\n    <ViewStub\n        android:id="@+id/search_box_stub"\n        android:layout_width="match_parent"\n        android:layout_height="wrap_content" />\n\n&|' chrome/android/java/res/layout/new_tab_page_layout.xml
+
 # desktop: omnibox
 sed -i 's/is_desktop_android = !!BUILDFLAG(IS_DESKTOP_ANDROID);/is_desktop_android = false;/' components/omnibox/browser/zero_suggest_verbatim_match_provider.cc
 sed -i 's/is_android_mobile = is_android_any \&\& !is_android_desktop;/is_android_mobile = is_android_any \&\& is_android_desktop;/' components/omnibox/browser/autocomplete_result.cc
