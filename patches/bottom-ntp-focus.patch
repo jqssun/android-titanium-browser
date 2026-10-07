@@ -1,0 +1,1063 @@
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+@@ -993,9 +993,10 @@
+      * any focus.
+      *
+      * @param percent The percentage of the URL bar focus animation.
+-     */
+-    public void setUrlFocusChangeAnimationPercent(float percent) {
+-        mNewTabPageCoordinator.setUrlFocusChangeAnimationPercent(percent);
++     * @param toolbarTop The toolbar top in NTP layout coordinates, excluding keyboard translation.
++     */
++    public void setUrlFocusChangeAnimationPercent(float percent, int toolbarTop) {
++        mNewTabPageCoordinator.setUrlFocusChangeAnimationPercent(percent, toolbarTop);
+     }
+ 
+     /**
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinator.java
+@@ -201,6 +201,8 @@
+ 
+     private float mUrlFocusChangePercent;
+     private boolean mDisableUrlFocusChangeAnimations;
++    private boolean mToolbarAtBottom;
++    private int mToolbarTop;
+ 
+     /** Flag used to request some layout changes after the next layout pass is completed. */
+     private boolean mTileCountChanged;
+@@ -894,6 +896,11 @@
+         return mUrlFocusChangePercent;
+     }
+ 
++    void setUrlFocusChangeAnimationPercent(float percent, int toolbarTop) {
++        mToolbarTop = toolbarTop;
++        setUrlFocusChangeAnimationPercent(percent);
++    }
++
+     void onUrlFocusAnimationChanged() {
+         /*
+          * Avoid Y-translation when animation is disabled, view is moving or on tablet form-factor.
+@@ -909,15 +916,21 @@
+             return;
+         }
+ 
+-        // Translate so that the search box is at the top, but only upwards.
+-        int basePosition =
+-                mScrollDelegate.getVerticalScrollOffset() + mNewTabPageLayout.getPaddingTop();
+-        int target =
+-                Math.max(
+-                        basePosition,
+-                        getSearchBoxView().getBottom()
+-                                - getSearchBoxView().getPaddingBottom()
+-                                - mSearchBoxBoundsVerticalInset);
++        int basePosition = mScrollDelegate.getVerticalScrollOffset();
++        int target;
++        if (mToolbarAtBottom) {
++            // Mirror the focus translation toward the bottom toolbar's layout position.
++            basePosition += mToolbarTop;
++            target = Math.min(
++                    basePosition, getSearchBoxView().getTop() + mSearchBoxBoundsVerticalInset);
++        } else {
++            basePosition += mNewTabPageLayout.getPaddingTop();
++            target = Math.max(
++                    basePosition,
++                    getSearchBoxView().getBottom()
++                            - getSearchBoxView().getPaddingBottom()
++                            - mSearchBoxBoundsVerticalInset);
++        }
+ 
+         float translationY = mUrlFocusChangePercent * (basePosition - target);
+         mModel.set(NewTabPageLayoutProperties.TRANSITION_Y, translationY);
+@@ -1059,6 +1072,15 @@
+     void setSearchBoxScrollListener(@Nullable OnSearchBoxScrollListener listener) {
+         mSearchBoxScrollListener = listener;
+         if (mSearchBoxScrollListener != null) updateSearchBoxOnScroll();
++    }
++
++    void setToolbarAtBottom(boolean atBottom) {
++        if (mNtpSearchBox == null || mToolbarAtBottom == atBottom) return;
++        mToolbarAtBottom = atBottom;
++        updateTopPadding();
++        mNewTabPageLayout.setToolbarAtBottom(atBottom);
++        onUrlFocusAnimationChanged();
++        updateSearchBoxOnScroll();
+     }
+ 
+     // NewTabPageLayout.Delegate implementations.
+@@ -1564,15 +1586,21 @@
+         mCurrentNtpFakeSearchBoxTransitionStartOffset =
+                 getNtpSearchBoxTransitionStartOffset(!mSearchProviderHasLogo) + mTopInset;
+ 
+-        int toolbarHeightNoShadow =
+-                mActivity.getResources().getDimensionPixelSize(R.dimen.toolbar_height_no_shadow);
+-        // Top padding is applied to the NTP layout, ensuring all UI components remain in their
+-        // original positions after Status bar is hidden.
+-        mModel.set(NewTabPageLayoutProperties.TOP_INSET_PX, toolbarHeightNoShadow + mTopInset);
++        updateTopPadding();
+ 
+         if (mEnableLogs) {
+             Log.i(TAG, "The top padding to add on the NTP is %d.", mTopInset);
+         }
++    }
++
++    private void updateTopPadding() {
++        // Bottom controls already reserve their space outside the NTP viewport.
++        int toolbarPadding =
++                mToolbarAtBottom
++                        ? 0
++                        : mActivity.getResources()
++                                .getDimensionPixelSize(R.dimen.toolbar_height_no_shadow);
++        mModel.set(NewTabPageLayoutProperties.TOP_INSET_PX, toolbarPadding + mTopInset);
+     }
+ 
+     /** Called when a customized background image is selected or deselected. */
+--- a/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageLayout.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageLayout.java
+@@ -43,6 +43,8 @@
+ 
+     private @Nullable Delegate mDelegate;
+     private @Nullable View mSearchBoxView;
++    private int mSearchBoxIndex;
++    private boolean mToolbarAtBottom;
+ 
+     /** Constructor for inflating from XML. */
+     public NewTabPageLayout(Context context, AttributeSet attrs) {
+@@ -108,15 +110,28 @@
+     /** Sets the search box view. */
+     public void setSearchBoxView(View view) {
+         mSearchBoxView = view;
++        mSearchBoxIndex = indexOfChild(view);
++    }
++
++    void setToolbarAtBottom(boolean atBottom) {
++        if (mSearchBoxView == null || mToolbarAtBottom == atBottom) return;
++        mToolbarAtBottom = atBottom;
++        for (int i = 0; i < getChildCount(); i++) {
++            getChildAt(i).setTranslationY(0f);
++        }
++        removeView(mSearchBoxView);
++        addView(mSearchBoxView, atBottom ? getChildCount() : mSearchBoxIndex);
+     }
+ 
+     /**
+-     * Sets the translation_y of the fakebox and all views above it, but not the views below. Used
++     * Sets the translation_y of the fakebox and views between it and the toolbar edge. Used
+      * when the url focus animation is combined with the omnibox suggestions list animation to
+      * reduce the number of visual elements in motion.
+      */
+     void setTranslationYOfFakeboxAndAbove(float translationY) {
+-        for (int i = 0; i < getChildCount(); i++) {
++        int step = mToolbarAtBottom ? -1 : 1;
++        for (int i = mToolbarAtBottom ? getChildCount() - 1 : 0;
++                i >= 0 && i < getChildCount(); i += step) {
+             View view = getChildAt(i);
+             view.setTranslationY(translationY);
+             if (view == mSearchBoxView) return;
+--- a/chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java
++++ b/chrome/android/java/src/org/chromium/chrome/browser/toolbar/ToolbarManager.java
+@@ -277,6 +277,7 @@
+ import org.chromium.ui.base.BackGestureEventSwipeEdge;
+ import org.chromium.ui.base.DeviceFormFactor;
+ import org.chromium.ui.base.DeviceInput;
++import org.chromium.ui.base.ViewUtils;
+ import org.chromium.ui.base.WindowAndroid;
+ import org.chromium.ui.display.DisplayUtil;
+ import org.chromium.ui.modaldialog.ModalDialogManager;
+@@ -1734,6 +1735,9 @@
+ 
+                     @Override
+                     public void onControlsPositionChanged(@ControlsPosition int controlsPosition) {
++                        if (getNewTabPageForCurrentTab() != null) {
++                            mToolbar.onTabContentViewChanged();
++                        }
+                         Tab currentTab = mActivityTabProvider.get();
+                         applyIncognitoNtpAccessibilityOrder(currentTab);
+                     }
+@@ -2296,6 +2300,15 @@
+     // Base abstract implementation of NewTabPageDelegate for phone/table toolbar layout.
+     private abstract class ToolbarNtpDelegate implements NewTabPageDelegate {
+         protected @Nullable NewTabPage mVisibleNtp;
++        private final int[] mNtpPosition = new int[2];
++        private final int[] mToolbarPosition = new int[2];
++
++        private int getToolbarTop(NewTabPage ntp) {
++            View root = mToolbarLayout.getRootView();
++            ViewUtils.getRelativeLayoutPosition(root, ntp.getView(), mNtpPosition);
++            ViewUtils.getRelativeLayoutPosition(root, mToolbarLayout, mToolbarPosition);
++            return mToolbarPosition[1] - mNtpPosition[1];
++        }
+ 
+         @Override
+         public boolean wasShowingNtp() {
+@@ -2361,8 +2374,14 @@
+ 
+         @Override
+         public void getSearchBoxBounds(Rect bounds, Point translation) {
+-            assert getNewTabPageForCurrentTab() != null;
+-            getNewTabPageForCurrentTab().getSearchBoxBounds(bounds, translation);
++            NewTabPage ntp = getNewTabPageForCurrentTab();
++            assert ntp != null;
++            ntp.getSearchBoxBounds(bounds, translation);
++            if (mBrowserControlsSizer.getControlsPosition() == ControlsPosition.BOTTOM
++                    && translation.y != Integer.MIN_VALUE) {
++                // Keyboard translation belongs to the toolbar container, not the NTP morph.
++                bounds.offset(0, -getToolbarTop(ntp));
++            }
+         }
+ 
+         @Override
+@@ -2386,7 +2405,9 @@
+         @Override
+         public void setUrlFocusChangeAnimationPercent(float fraction) {
+             NewTabPage ntp = getNewTabPageForCurrentTab();
+-            if (ntp != null) ntp.setUrlFocusChangeAnimationPercent(fraction);
++            if (ntp != null) {
++                ntp.setUrlFocusChangeAnimationPercent(fraction, getToolbarTop(ntp));
++            }
+         }
+     }
+ 
+@@ -3241,6 +3262,7 @@
+                                     + " UmaActivityObserver"));
+         }
+ 
++        if (mMiniOriginBarController != null) mMiniOriginBarController.onUrlFocusChange(hasFocus);
+         mToolbar.onUrlFocusChange(hasFocus);
+ 
+         if (mFindToolbarManager != null && hasFocus) mFindToolbarManager.hideToolbar();
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarPhone.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarPhone.java
+@@ -1093,6 +1093,7 @@
+     private float getLocationBarTranslationY() {
+         NewTabPageDelegate ntpDelegate = getToolbarDataProvider().getNewTabPageDelegate();
+         ntpDelegate.getSearchBoxBounds(mNtpSearchBoxBounds, mNtpSearchBoxTranslation);
++        if (mNtpSearchBoxTranslation.y == Integer.MIN_VALUE) return 0f;
+         float translationY = mNtpSearchBoxBounds.top - mLocationBar.getPhoneCoordinator().getTop();
+ 
+         // When edge-to-edge on top is enabled on NTP, the NTP search box bounds calculation
+@@ -1105,7 +1106,9 @@
+             translationY -= searchBoxInset;
+         }
+ 
+-        return Math.max(0, translationY);
++        return mBrowserControlsStateProvider.getControlsPosition() == ControlsPosition.BOTTOM
++                ? Math.min(0, translationY)
++                : Math.max(0, translationY);
+     }
+ 
+     private void createAndRunNtpFocusAnimatorRefactored() {
+--- a/chrome/android/junit/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinatorUnitTest.java
++++ b/chrome/android/junit/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinatorUnitTest.java
+@@ -424,6 +424,69 @@
+         assertTrue(model.get(NewTabPageLayoutProperties.TRANSITION_Y) < 0f);
+     }
+ 
++    @Test
++    public void testBottomToolbarRemovesOnlyToolbarPadding() {
++        int toolbarHeight =
++                mActivity.getResources().getDimensionPixelSize(R.dimen.toolbar_height_no_shadow);
++        assertEquals(toolbarHeight, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.setToolbarAtBottom(true);
++        assertEquals(0, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.setToolbarAtBottom(false);
++        assertEquals(toolbarHeight, mNewTabPageLayout.getPaddingTop());
++    }
++
++    @Test
++    public void testBottomToolbarPreservesChangingSystemInsets() {
++        int toolbarHeight =
++                mActivity.getResources().getDimensionPixelSize(R.dimen.toolbar_height_no_shadow);
++        mCoordinator.onToEdgeChange(24, true);
++        assertEquals(toolbarHeight + 24, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.setToolbarAtBottom(true);
++        assertEquals(24, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.onToEdgeChange(48, true);
++        assertEquals(48, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.setToolbarAtBottom(false);
++        assertEquals(toolbarHeight + 48, mNewTabPageLayout.getPaddingTop());
++        mCoordinator.onToEdgeChange(48, false);
++        assertEquals(toolbarHeight, mNewTabPageLayout.getPaddingTop());
++    }
++
++    @Test
++    public void testBottomToolbarFocusTranslation() {
++        mCoordinator.setToolbarAtBottom(true);
++        View searchBox = mCoordinator.getSearchBoxView();
++        searchBox.layout(0, 700, 1080, 800);
++        int inset = mCoordinator.getSearchBoxBoundsVerticalInset();
++        mCoordinator.setUrlFocusChangeAnimationPercent(0.5f, 1000);
++        assertEquals((1000 - 700 - inset) / 2f, searchBox.getTranslationY(), 0.01f);
++        mCoordinator.setUrlFocusChangeAnimationPercent(1f, 1000);
++        assertEquals(1000f, searchBox.getY() + inset, 0.01f);
++
++        // Recompute against a resized viewport and a scrolled NTP.
++        when(mScrollDelegate.getVerticalScrollOffset()).thenReturn(100);
++        mCoordinator.setUrlFocusChangeAnimationPercent(1f, 900);
++        assertEquals(900f, searchBox.getY() + inset - 100, 0.01f);
++        mCoordinator.setUrlFocusChangeAnimationPercent(0f, 900);
++        assertEquals(0f, searchBox.getTranslationY(), 0.01f);
++    }
++
++    @Test
++    public void testBottomToolbarKeepsFakeboxAndRestoresOrder() {
++        View searchBox = mCoordinator.getSearchBoxView();
++        View tiles = mNewTabPageLayout.findViewById(R.id.mv_tiles_container);
++        int originalIndex = mNewTabPageLayout.indexOfChild(searchBox);
++        mCoordinator.setToolbarAtBottom(true);
++        assertEquals(View.VISIBLE, searchBox.getVisibility());
++        assertTrue(mNewTabPageLayout.indexOfChild(tiles)
++                < mNewTabPageLayout.indexOfChild(searchBox));
++        mNewTabPageLayout.setTranslationYOfFakeboxAndAbove(100f);
++        assertEquals(100f, searchBox.getTranslationY(), 0.01f);
++        assertEquals(0f, tiles.getTranslationY(), 0.01f);
++        mCoordinator.setToolbarAtBottom(false);
++        assertEquals(originalIndex, mNewTabPageLayout.indexOfChild(searchBox));
++        assertEquals(View.VISIBLE, searchBox.getVisibility());
++    }
++
+     private void createCoordinator() {
+         createCoordinator(/* isLff= */ false);
+     }
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdownEmbedder.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdownEmbedder.java
+@@ -124,6 +124,11 @@
+      */
+     OmniboxAlignment getCurrentAlignment();
+ 
++    /** Whether suggestions should grow upward from a bottom-positioned toolbar. */
++    default boolean isToolbarAtBottom() {
++        return false;
++    }
++
+     /** Return whether the current window is a wide window. */
+     boolean isWideWindow();
+ 
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/OmniboxSuggestionsDropdownEmbedderImpl.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/OmniboxSuggestionsDropdownEmbedderImpl.java
+@@ -170,6 +170,11 @@
+     }
+ 
+     @Override
++    public boolean isToolbarAtBottom() {
++        return mControlsPositionSupplier.get() == ControlsPosition.BOTTOM;
++    }
++
++    @Override
+     public boolean isWideWindow() {
+         if (mForcePhoneStyleOmnibox) return false;
+         return mWindowWidthDp >= DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsContainer.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsContainer.java
+@@ -8,6 +8,7 @@
+ import android.content.Context;
+ import android.content.res.Configuration;
+ import android.util.AttributeSet;
++import android.view.Gravity;
+ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.View;
+@@ -64,6 +65,11 @@
+     @Override
+     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+         boolean shouldWrapDropdownHeight = mEmbedder != null && !mEmbedder.isPhoneStyleWindow();
++        boolean atBottom = mEmbedder != null && mEmbedder.isToolbarAtBottom();
++        // Keep short lists adjacent to the input; adapter order remains the relevance order.
++        ((LayoutParams) mDropdown.getLayoutParams()).gravity =
++                Gravity.START | (atBottom ? Gravity.BOTTOM : Gravity.TOP);
++        mDropdown.setReverseLayout(atBottom);
+ 
+         try (TraceEvent tracing = TraceEvent.scoped("OmniboxSuggestionsList.Measure");
+                 TimingMetric metric = OmniboxMetrics.recordSuggestionListMeasureTime();
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdown.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdown.java
+@@ -34,6 +34,7 @@
+ import org.chromium.chrome.browser.omnibox.R;
+ import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
+ import org.chromium.chrome.browser.omnibox.suggestions.SelectionController.TraversalMode;
++import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionView;
+ import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+ import org.chromium.components.omnibox.OmniboxFeatures;
+ import org.chromium.ui.base.KeyNavigationUtil;
+@@ -219,7 +220,11 @@
+             // - resultingDeltaY <= 0
+             // - requestedDeltaY <= 0
+             // - Math.abs(resultingDeltaY) < Math.abs(requestedDeltaY)
+-            boolean newIsScrolledToTop = resultingDeltaY > requestedDeltaY;
++            // "Top" tracks the first suggestion, which sits at the bottom in reverse layout.
++            boolean newIsScrolledToTop =
++                    getReverseLayout()
++                            ? resultingDeltaY < requestedDeltaY
++                            : resultingDeltaY > requestedDeltaY;
+ 
+             if (mIsScrolledToTop == newIsScrolledToTop) return resultingDeltaY;
+             mIsScrolledToTop = newIsScrolledToTop;
+@@ -440,6 +445,30 @@
+                 && mSelectionController.getPosition() == mSelectionController.getItemCount() - 1;
+     }
+ 
++    /** Sets the visual direction without changing suggestion ranking or selection indices. */
++    void setReverseLayout(boolean reverseLayout) {
++        if (mLayoutScrollListener.getReverseLayout() == reverseLayout) return;
++        int oldTopPadding = getBaseTopPadding();
++        int oldBottomPadding = getBaseBottomPadding();
++        mLayoutScrollListener.setReverseLayout(reverseLayout);
++        setPaddingRelative(
++                getPaddingStart(),
++                getPaddingTop() + getBaseTopPadding() - oldTopPadding,
++                getPaddingEnd(),
++                getPaddingBottom() + getBaseBottomPadding() - oldBottomPadding);
++        for (int i = 0; i < getChildCount(); i++) {
++            if (getChildAt(i) instanceof BaseSuggestionView<?> suggestion) {
++                suggestion.setReverseLayout(reverseLayout);
++            }
++        }
++        invalidateItemDecorations();
++    }
++
++    static boolean isReversed(RecyclerView parent) {
++        return parent.getLayoutManager() instanceof LinearLayoutManager manager
++                && manager.getReverseLayout();
++    }
++
+     /** Resets selection typically in response to changes to the list. */
+     public void resetSelection() {
+         mLayoutScrollListener.scrollToPositionWithOffset(0, 0);
+@@ -511,6 +540,9 @@
+ 
+     @Override
+     public void onChildAttachedToWindow(View child) {
++        if (child instanceof BaseSuggestionView<?> suggestion) {
++            suggestion.setReverseLayout(mLayoutScrollListener.getReverseLayout());
++        }
+         child.setAlpha(mChildAlpha);
+         if (mChildVerticalTranslation != 0.0f) {
+             child.setTranslationY(mChildVerticalTranslation);
+@@ -588,14 +620,17 @@
+             return ret;
+         }
+ 
+-        boolean isGoDownKey = KeyNavigationUtil.isGoDown(event);
+-        boolean isGoUpKey = KeyNavigationUtil.isGoUp(event);
+-
+-        if (isGoDownKey) {
++        boolean reversed = mLayoutScrollListener.getReverseLayout();
++        boolean isNextKey =
++                reversed ? KeyNavigationUtil.isGoUp(event) : KeyNavigationUtil.isGoDown(event);
++        boolean isPreviousKey =
++                reversed ? KeyNavigationUtil.isGoDown(event) : KeyNavigationUtil.isGoUp(event);
++
++        if (isNextKey) {
+             mSelectionController.selectNextItem();
+             handleSelectionChange();
+             return true;
+-        } else if (isGoUpKey) {
++        } else if (isPreviousKey) {
+             mSelectionController.selectPreviousItem();
+             handleSelectionChange();
+             return true;
+@@ -680,12 +715,12 @@
+ 
+     @VisibleForTesting
+     int getBaseBottomPadding() {
+-        return mBaseBottomPadding;
++        return mLayoutScrollListener.getReverseLayout() ? mBaseTopPadding : mBaseBottomPadding;
+     }
+ 
+     @VisibleForTesting
+     int getBaseTopPadding() {
+-        return mBaseTopPadding;
++        return mLayoutScrollListener.getReverseLayout() ? mBaseBottomPadding : mBaseTopPadding;
+     }
+ 
+     /**
+@@ -697,7 +732,7 @@
+     public void setVerticalPadding(@Px int topPadding, @Px int bottomPadding) {
+         mBaseTopPadding = topPadding;
+         mBaseBottomPadding = bottomPadding;
+-        this.setPaddingRelative(0, mBaseTopPadding, 0, mBaseBottomPadding);
++        this.setPaddingRelative(0, getBaseTopPadding(), 0, getBaseBottomPadding());
+     }
+ 
+     @VisibleForTesting
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsContainerUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsContainerUnitTest.java
+@@ -16,6 +16,7 @@
+ 
+ import android.content.Context;
+ import android.view.ContextThemeWrapper;
++import android.view.Gravity;
+ import android.view.MotionEvent;
+ import android.view.View.MeasureSpec;
+ import android.view.ViewGroup;
+@@ -57,9 +58,15 @@
+     private final SettableNullableObservableSupplier<OmniboxAlignment> mOmniboxAlignmentSupplier =
+             ObservableSuppliers.createNullable();
+     private boolean mIsTablet;
++    private boolean mToolbarAtBottom;
+     private boolean mAttachedToWindow;
+     private final OmniboxSuggestionsDropdownEmbedder mEmbedder =
+             new OmniboxSuggestionsDropdownEmbedder() {
++                @Override
++                public boolean isToolbarAtBottom() {
++                    return mToolbarAtBottom;
++                }
++
+                 @Override
+                 public boolean isWideWindow() {
+                     return mIsTablet;
+@@ -340,6 +347,25 @@
+     }
+ 
+     @Test
++    public void testBottomToolbarAnchorsAndReversesDropdown() {
++        mContainer.setEmbedder(mEmbedder);
++        mContainer.onOmniboxSessionStateChange(true);
++        mOmniboxAlignmentSupplier.set(new OmniboxAlignment(0, 0, 600, 400, 0, 0, 0, 0));
++        mToolbarAtBottom = true;
++        layoutDropdown(600, 800);
++        assertEquals(Gravity.START | Gravity.BOTTOM,
++                ((LayoutParams) mDropdown.getLayoutParams()).gravity);
++        verify(mDropdown).setReverseLayout(true);
++
++        mToolbarAtBottom = false;
++        mContainer.requestLayout();
++        layoutDropdown(600, 800);
++        assertEquals(Gravity.START | Gravity.TOP,
++                ((LayoutParams) mDropdown.getLayoutParams()).gravity);
++        verify(mDropdown).setReverseLayout(false);
++    }
++
++    @Test
+     public void setShouldClipToOutline_clipsOutlineWhenSet() {
+         mContainer.setShouldClipToOutline(true);
+         assertTrue(mContainer.getClipToOutline());
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdownUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdownUnitTest.java
+@@ -382,6 +382,45 @@
+     }
+ 
+     @Test
++    public void testReversedDropdownPreservesAndSwapsPadding() {
++        mDropdown.setVerticalPadding(12, 4);
++        mDropdown.setReverseLayout(true);
++        assertEquals(4, mDropdown.getPaddingTop());
++        assertEquals(12, mDropdown.getPaddingBottom());
++        mDropdown.setVerticalPadding(16, 8);
++        assertEquals(8, mDropdown.getPaddingTop());
++        assertEquals(16, mDropdown.getPaddingBottom());
++        mDropdown.setReverseLayout(false);
++        assertEquals(16, mDropdown.getPaddingTop());
++        assertEquals(8, mDropdown.getPaddingBottom());
++    }
++
++    @Test
++    public void testReversedDropdownArrowKeysFollowVisualOrder() {
++        when(mDropdown.isShown()).thenReturn(true);
++        mDropdown.setReverseLayout(true);
++        mDropdown.selectFirstItem();
++        mDropdown.onKeyDown(KeyEvent.KEYCODE_DPAD_UP,
++                new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_UP));
++        assertEquals(Integer.valueOf(1), mDropdown.getSelectedIndex());
++        mDropdown.onKeyDown(KeyEvent.KEYCODE_DPAD_DOWN,
++                new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_DOWN));
++        assertEquals(Integer.valueOf(0), mDropdown.getSelectedIndex());
++    }
++
++    @Test
++    public void testReversedDropdownRestoresKeyboardAtFirstSuggestion() {
++        mListener.setReverseLayout(true);
++        mListener.setSuggestionDropdownScrollListener(mDropdownScrollListener);
++        mListener.setSuggestionDropdownOverscrolledToTopListener(mDropdownScrollToTopListener);
++        assertEquals(0, mListener.updateKeyboardVisibilityAndScroll(-10, -10));
++        verify(mDropdownScrollListener).run();
++        mListener.onNewGesture();
++        assertEquals(0, mListener.updateKeyboardVisibilityAndScroll(0, 10));
++        verify(mDropdownScrollToTopListener).run();
++    }
++
++    @Test
+     public void testNavigationListener_notifiedOnKeyDown() {
+         mDropdown.setNavigationListener(mNavigationListener);
+         when(mDropdown.isShown()).thenReturn(true);
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SuggestionLayout.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SuggestionLayout.java
+@@ -41,6 +41,9 @@
+     private @Px int mContentVerticalPaddingPx;
+     private boolean mUseLargeDecoration;
+     private boolean mShowDecoration;
++    private boolean mReverseLayout;
++    private boolean mRoundTopEdge;
++    private boolean mRoundBottomEdge;
+ 
+     /**
+      * SuggestionLayout's LayoutParams.
+@@ -189,7 +192,20 @@
+         mContentVerticalPaddingPx = contentVerticalPaddingPx;
+     }
+ 
++    /** Mirrors group edges while preserving the rounding requested by the view binder. */
++    public void setReverseLayout(boolean reverseLayout) {
++        if (mReverseLayout == reverseLayout) return;
++        mReverseLayout = reverseLayout;
++        setRoundingEdges(mRoundTopEdge, mRoundBottomEdge);
++    }
++
+     public void setRoundingEdges(boolean roundTopEdge, boolean roundBottomEdge) {
++        mRoundTopEdge = roundTopEdge;
++        mRoundBottomEdge = roundBottomEdge;
++        if (mReverseLayout) {
++            roundTopEdge = mRoundBottomEdge;
++            roundBottomEdge = mRoundTopEdge;
++        }
+         boolean needUpdate =
+                 mOutlineProvider.isTopEdgeRounded() != roundTopEdge
+                         || mOutlineProvider.isBottomEdgeRounded() != roundBottomEdge;
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/GroupSeparatorDecoration.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/GroupSeparatorDecoration.java
+@@ -50,7 +50,11 @@
+                     == GroupSeparatorType.NONE) {
+                 return;
+             }
+-            outRect.top = mSeparatorHeight;
++            if (OmniboxSuggestionsDropdown.isReversed(parent)) {
++                outRect.bottom = mSeparatorHeight;
++            } else {
++                outRect.top = mSeparatorHeight;
++            }
+         }
+     }
+ 
+@@ -70,7 +74,10 @@
+                                 == GroupSeparatorType.LINE) {
+                     RecyclerView.LayoutParams lp =
+                             (RecyclerView.LayoutParams) child.getLayoutParams();
+-                    int centerY = child.getTop() - lp.topMargin - mSeparatorHeight / 2;
++                    int centerY =
++                            OmniboxSuggestionsDropdown.isReversed(parent)
++                                    ? child.getBottom() + lp.bottomMargin + mSeparatorHeight / 2 - 1
++                                    : child.getTop() - lp.topMargin - mSeparatorHeight / 2;
+                     c.drawRect(left, centerY, right, centerY + 1, mPaint);
+                 }
+             }
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/HeaderDecoration.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/HeaderDecoration.java
+@@ -82,7 +82,11 @@
+         PropertyModel model = getModel(view, parent);
+         if (model != null
+                 && !TextUtils.isEmpty(model.get(SuggestionCommonProperties.HEADER_TITLE))) {
+-            outRect.top = mHeaderHeight;
++            if (OmniboxSuggestionsDropdown.isReversed(parent)) {
++                outRect.bottom = mHeaderHeight;
++            } else {
++                outRect.top = mHeaderHeight;
++            }
+         }
+     }
+ 
+@@ -128,10 +132,11 @@
+             }
+ 
+             FontMetrics fm = paint.getFontMetrics();
+-            float y =
+-                    (child.getTop() + child.getTranslationY())
+-                            - (mHeaderHeight / 2f)
+-                            - ((fm.bottom + fm.top) / 2f);
++            float centerY =
++                    OmniboxSuggestionsDropdown.isReversed(parent)
++                            ? child.getBottom() + mHeaderHeight / 2f
++                            : child.getTop() - mHeaderHeight / 2f;
++            float y = centerY + child.getTranslationY() - ((fm.bottom + fm.top) / 2f);
+ 
+             canvas.drawText(ellipsizedTitle.toString(), x, y, paint);
+         }
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/SuggestionHorizontalDivider.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/SuggestionHorizontalDivider.java
+@@ -39,9 +39,12 @@
+         for (int i = 0; i < childCount; ++i) {
+             View child = parent.getChildAt(i);
+             if (!shouldDrawDivider(child, parent)) continue;
+-            float bottom = child.getY() + child.getHeight();
++            float bottom =
++                    child.getY()
++                            + (OmniboxSuggestionsDropdown.isReversed(parent)
++                                    ? mHeight : child.getHeight());
+             float left = child.getX();
+-            // Erase a (child.getWidth() x mHeight) strip from the bottom of the child view being
++            // Erase a (child.getWidth() x mHeight) strip from the trailing edge of the child being
+             // drawn. This creates a "divider" in the form of a mHeight tall line matching the
+             // background of the enclosing recycler view. Op.DIFFERENCE means "subtract the op
+             // region from the first region" i.e. erase it; see
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SuggestionLayoutUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SuggestionLayoutUnitTest.java
+@@ -115,6 +115,22 @@
+     }
+ 
+     @Test
++    public void reversedLayoutMirrorsAndRestoresLogicalRounding() {
++        mLayout.setRoundingEdges(true, false);
++        mLayout.setReverseLayout(true);
++        assertFalse(mLayout.mOutlineProvider.isTopEdgeRounded());
++        assertTrue(mLayout.mOutlineProvider.isBottomEdgeRounded());
++
++        // A recycled row can receive new group metadata while direction stays reversed.
++        mLayout.setRoundingEdges(false, true);
++        assertTrue(mLayout.mOutlineProvider.isTopEdgeRounded());
++        assertFalse(mLayout.mOutlineProvider.isBottomEdgeRounded());
++        mLayout.setReverseLayout(false);
++        assertFalse(mLayout.mOutlineProvider.isTopEdgeRounded());
++        assertTrue(mLayout.mOutlineProvider.isBottomEdgeRounded());
++    }
++
++    @Test
+     public void setRoundingEdges_clipToOutlineWhenRounding() {
+         // By default, all edges are rounded.
+         assertFalse(
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/GroupSeparatorDecorationUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/GroupSeparatorDecorationUnitTest.java
+@@ -20,6 +20,7 @@
+ import android.graphics.Rect;
+ import android.view.View;
+ 
++import androidx.recyclerview.widget.LinearLayoutManager;
+ import androidx.recyclerview.widget.RecyclerView;
+ import androidx.test.filters.SmallTest;
+ 
+@@ -130,6 +131,18 @@
+ 
+     @Test
+     @SmallTest
++    public void testReversedSeparatorPreservesHeight() {
++        LinearLayoutManager manager = new LinearLayoutManager(mActivity);
++        manager.setReverseLayout(true);
++        doReturn(manager).when(mRecyclerView).getLayoutManager();
++        Rect outRect = new Rect();
++        mDecoration.getItemOffsets(outRect, mChildViewWithLineSeparator, mRecyclerView, mState);
++        assertEquals(0, outRect.top);
++        assertEquals(mExpectedHeight, outRect.bottom);
++    }
++
++    @Test
++    @SmallTest
+     public void testGetItemOffsets_withLineSeparator() {
+         Rect outRect = new Rect();
+         mDecoration.getItemOffsets(outRect, mChildViewWithLineSeparator, mRecyclerView, mState);
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/HeaderDecorationUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/HeaderDecorationUnitTest.java
+@@ -18,6 +18,7 @@
+ import android.graphics.Rect;
+ import android.view.View;
+ 
++import androidx.recyclerview.widget.LinearLayoutManager;
+ import androidx.recyclerview.widget.RecyclerView;
+ import androidx.test.filters.SmallTest;
+ 
+@@ -111,6 +112,18 @@
+ 
+     @Test
+     @SmallTest
++    public void testReversedHeaderPreservesHeight() {
++        LinearLayoutManager manager = new LinearLayoutManager(mActivity);
++        manager.setReverseLayout(true);
++        doReturn(manager).when(mRecyclerView).getLayoutManager();
++        Rect outRect = new Rect();
++        mDecoration.getItemOffsets(outRect, mChildViewWithHeader, mRecyclerView, mState);
++        assertEquals(0, outRect.top);
++        assertEquals(mExpectedHeight, outRect.bottom);
++    }
++
++    @Test
++    @SmallTest
+     public void testGetItemOffsets_withHeader() {
+         Rect outRect = new Rect();
+         mDecoration.getItemOffsets(outRect, mChildViewWithHeader, mRecyclerView, mState);
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/SuggestionHorizontalDividerUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/suggestions/SuggestionHorizontalDividerUnitTest.java
+@@ -14,6 +14,7 @@
+ import android.graphics.Region.Op;
+ import android.view.View;
+ 
++import androidx.recyclerview.widget.LinearLayoutManager;
+ import androidx.recyclerview.widget.RecyclerView;
+ import androidx.test.filters.SmallTest;
+ 
+@@ -83,6 +84,19 @@
+ 
+     @Test
+     @SmallTest
++    public void testReversedDividerPreservesThickness() {
++        LinearLayoutManager manager = new LinearLayoutManager(mActivity);
++        manager.setReverseLayout(true);
++        doReturn(manager).when(mRecyclerView).getLayoutManager();
++        doReturn(8.0f).when(mChildViewWithDivider).getX();
++        doReturn(92).when(mChildViewWithDivider).getWidth();
++        doReturn(10.0f).when(mChildViewWithDivider).getY();
++        mDecoration.onDraw(mCanvas, mRecyclerView, mState);
++        verify(mCanvas).clipRect(8, 10, 100, 11, Op.DIFFERENCE);
++    }
++
++    @Test
++    @SmallTest
+     public void testDraw() {
+         doReturn(8.0f).when(mChildViewWithDivider).getX();
+         doReturn(92).when(mChildViewWithDivider).getWidth();
+--- a/chrome/browser/android/compositor/layer/toolbar_layer.cc
++++ b/chrome/browser/android/compositor/layer/toolbar_layer.cc
+@@ -146,7 +146,8 @@
+   // as for 2025.
+   // TODO(https://crbug.com/454338286): Rename / remove in favor of y_Offset.
+   if (kInvalidContentOffset != legacy_content_offset) {
+-    y_offset = legacy_content_offset - layer_->bounds().height();
++    // The hairline can precede the toolbar, so anchor its actual bottom edge.
++    y_offset = legacy_content_offset - resource->toolbar_rect().bottom();
+   }
+ 
+   layer_->SetPosition(gfx::PointF(x_offset, y_offset));
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionControllerTest.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionControllerTest.java
+@@ -519,7 +519,7 @@
+         assertControlsAtBottom();
+ 
+         mIsNtpShowing.set(true);
+-        assertControlsAtTop();
++        assertControlsAtBottom();
+ 
+         mIsNtpShowing.set(false);
+         assertControlsAtBottom();
+@@ -545,7 +545,7 @@
+         assertControlsAtBottom();
+ 
+         mIsOmniboxFocused.set(true);
+-        assertControlsAtTop();
++        assertControlsAtBottom();
+ 
+         mIsOmniboxFocused.set(false);
+         assertControlsAtBottom();
+@@ -630,7 +630,7 @@
+         BottomControlsLayer progressBarLayer =
+                 mBottomControlsStacker.getLayerForTesting(LayerType.PROGRESS_BAR);
+ 
+-        mIsOmniboxFocused.set(true);
++        mIsTabSwitcherShowing.set(true);
+         assertControlsAtTop();
+         mBrowserControlsObserver.onBottomControlsHeightAnimationEnded();
+ 
+@@ -664,7 +664,7 @@
+                         ControlsPosition.BOTTOM));
+ 
+         assertEquals(
+-                StateTransition.SNAP_TO_TOP,
++                StateTransition.NONE,
+                 ToolbarPositionController.calculateStateTransition(
+                         prefStateChanged,
+                         true,
+@@ -703,7 +703,7 @@
+                         ControlsPosition.BOTTOM));
+ 
+         assertEquals(
+-                StateTransition.SNAP_TO_TOP,
++                StateTransition.NONE,
+                 ToolbarPositionController.calculateStateTransition(
+                         prefStateChanged,
+                         ntpShowing,
+@@ -834,12 +834,11 @@
+         setUserToolbarAnchorPreference(/* showToolbarOnTop= */ null);
+         assertTrue(ToolbarPositionController.shouldShowToolbarOnTop(tab));
+ 
+-        // When the user explicitly asks for bottom toolbar, NTP should still show that toolbar on
+-        // top.
+-        setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
+-        assertTrue(ToolbarPositionController.shouldShowToolbarOnTop(tab));
+-
+-        // ... NTP always shows toolbar on top.
++        // The NTP follows the explicit bottom toolbar preference.
++        setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
++        assertFalse(ToolbarPositionController.shouldShowToolbarOnTop(tab));
++
++        // ... same for the explicit top toolbar.
+         setUserToolbarAnchorPreference(/* showToolbarOnTop= */ true);
+         assertTrue(ToolbarPositionController.shouldShowToolbarOnTop(tab));
+     }
+@@ -983,7 +982,7 @@
+         assertControlsAtBottom();
+ 
+         doReturn(true).when(mProgressBarParent).isInLayout();
+-        mIsNtpShowing.set(true);
++        mIsTabSwitcherShowing.set(true);
+ 
+         // Progress bar params should not have changed yet; changing them mid-layout pass can cause
+         // a crash.
+@@ -1276,15 +1275,15 @@
+                 mBottomControlsStacker.getLayerForTesting(LayerType.BOTTOM_TOOLBAR);
+         assertEquals(LayerVisibility.VISIBLE, toolbarLayer.getLayerVisibility());
+ 
+-        // Simulate Omnibox Focus -> Should SNAP to TOP.
+-        mIsOmniboxFocused.set(true);
++        // Show the tab switcher -> Should SNAP to TOP.
++        mIsTabSwitcherShowing.set(true);
+         assertControlsAtTop();
+ 
+         // It should be in HIDDEN state IMMEDIATELY, not HIDING.
+         assertEquals(LayerVisibility.HIDDEN, toolbarLayer.getLayerVisibility());
+ 
+-        // Simulate Omnibox Unfocus -> Should SNAP to BOTTOM.
+-        mIsOmniboxFocused.set(false);
++        // Hide the tab switcher -> Should SNAP to BOTTOM.
++        mIsTabSwitcherShowing.set(false);
+         assertControlsAtBottom();
+ 
+         // It should be in VISIBLE state IMMEDIATELY, not SHOWING.
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/MiniOriginBarController.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/MiniOriginBarController.java
+@@ -379,6 +379,10 @@
+     }
+ 
+     private void hideMiniOriginBar() {
++        mLocationBar.runWithPreservedUrlBarFocus(this::restoreLocationBarToToolbar);
++    }
++
++    private void restoreLocationBarToToolbar() {
+         mShowingMiniOriginBar = false;
+         setMinimizationProgress(0.0f);
+         mLocationBar.setShowOriginOnly(false);
+@@ -398,6 +402,11 @@
+                 mDefaultLocationBarRightPadding,
+                 locationBarView.getPaddingBottom());
+         mLocationBar.setUrlBarUsesSmallText(false);
++    }
++
++    /** Restores the full toolbar when the omnibox takes focus from a form field. */
++    public void onUrlFocusChange(boolean hasFocus) {
++        if (hasFocus) transitionToNewState(MiniOriginState.NOT_READY);
+     }
+ 
+     public void destroy() {
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/MiniOriginBarControllerTest.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/MiniOriginBarControllerTest.java
+@@ -12,6 +12,7 @@
+ import static org.mockito.ArgumentMatchers.eq;
+ import static org.mockito.Mockito.atLeastOnce;
+ import static org.mockito.Mockito.clearInvocations;
++import static org.mockito.Mockito.doAnswer;
+ import static org.mockito.Mockito.doReturn;
+ import static org.mockito.Mockito.never;
+ import static org.mockito.Mockito.verify;
+@@ -111,6 +112,12 @@
+ 
+     @Before
+     public void setUp() {
++        doAnswer(invocation -> {
++                    invocation.<Runnable>getArgument(0).run();
++                    return null;
++                })
++                .when(mLocationBar)
++                .runWithPreservedUrlBarFocus(any());
+         mContext = ContextUtils.getApplicationContext();
+         mControlContainerLayoutParams.gravity = Gravity.TOP;
+         doReturn(ControlsPosition.TOP).when(mBrowserControlsSizer).getControlsPosition();
+@@ -931,6 +938,25 @@
+     }
+ 
+     @Test
++    public void testOmniboxFocusRestoresFullToolbarAtBottom() {
++        doReturn(ControlsPosition.BOTTOM).when(mBrowserControlsSizer).getControlsPosition();
++        mMiniOriginBarController.onControlsPositionChanged(ControlsPosition.BOTTOM);
++        mIsFormFieldFocused.onNodeAttributeUpdated(true, false);
++        mKeyboardVisibilityDelegate.setVisibilityForTests(true);
++        assertEquals(
++                MiniOriginState.SHOWING, mMiniOriginBarController.getCurrentStateForTesting());
++
++        mOmniboxFocused = true;
++        mMiniOriginBarController.onUrlFocusChange(true);
++
++        assertEquals(
++                MiniOriginState.NOT_READY, mMiniOriginBarController.getCurrentStateForTesting());
++        verify(mLocationBar).setMiniOriginMode(false);
++        verify(mLocationBar).setUrlBarUsesSmallText(false);
++        verify(mLocationBarView).setLayoutParams(mLocationBarLayoutParams);
++    }
++
++    @Test
+     public void testOmniboxFocusCausesPositionChangeToBottom() {
+         mIsFormFieldFocused.onNodeAttributeUpdated(true, false);
+         mKeyboardVisibilityDelegate.setVisibilityForTests(true);
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBar.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBar.java
+@@ -115,6 +115,11 @@
+      */
+     default void setMiniOriginMode(boolean active) {}
+ 
++    /** Moves the location bar without changing its URL field's focus or text selection. */
++    default void runWithPreservedUrlBarFocus(Runnable action) {
++        action.run();
++    }
++
+     /** Gets the height of the url bar view contained by the location bar. */
+     default float getUrlBarHeight() {
+         return 0;
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBarCoordinator.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBarCoordinator.java
+@@ -834,6 +834,17 @@
+     }
+ 
+     @Override
++    public void runWithPreservedUrlBarFocus(Runnable action) {
++        boolean hadFocus = mUrlCoordinator.hasFocus();
++        mUrlCoordinator.startReparenting();
++        try {
++            action.run();
++        } finally {
++            mUrlCoordinator.finishReparenting(hadFocus);
++        }
++    }
++
++    @Override
+     public void setMiniOriginMode(boolean active) {
+         mMiniOriginMode = active;
+         mUrlCoordinator.setBoundsEllipsisEnabled(active ? false : mDefaultBoundsEllipsis);
+--- a/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBarCoordinatorUnitTest.java
++++ b/chrome/browser/ui/android/omnibox/java/src/org/chromium/chrome/browser/omnibox/LocationBarCoordinatorUnitTest.java
+@@ -5,8 +5,11 @@
+ package org.chromium.chrome.browser.omnibox;
+ 
+ import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertThrows;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.ArgumentMatchers.eq;
++import static org.mockito.Mockito.inOrder;
++import static org.mockito.Mockito.mock;
+ import static org.mockito.Mockito.never;
+ import static org.mockito.Mockito.verify;
+ import static org.mockito.Mockito.when;
+@@ -154,6 +157,32 @@
+     }
+ 
+     @Test
++    public void testReparentingPreservesFocusAndSelection() {
++        Runnable action = mock(Runnable.class);
++        mCoordinator.runWithPreservedUrlBarFocus(action);
++        var order = inOrder(mUrlCoordinator, action);
++        order.verify(mUrlCoordinator).startReparenting();
++        order.verify(action).run();
++        order.verify(mUrlCoordinator).finishReparenting(true);
++    }
++
++    @Test
++    public void testReparentingDoesNotStealFocus() {
++        when(mUrlCoordinator.hasFocus()).thenReturn(false);
++        mCoordinator.runWithPreservedUrlBarFocus(() -> {});
++        verify(mUrlCoordinator).finishReparenting(false);
++    }
++
++    @Test
++    public void testReparentingRestoresFocusNotificationsAfterFailure() {
++        assertThrows(IllegalStateException.class,
++                () -> mCoordinator.runWithPreservedUrlBarFocus(() -> {
++                    throw new IllegalStateException();
++                }));
++        verify(mUrlCoordinator).finishReparenting(true);
++    }
++
++    @Test
+     public void testSetMiniOriginMode_Transitions() {
+         // Setup default bounds ellipsis
+         when(mLocationBarDataProvider.getPageClassification(false))
