@@ -19,17 +19,20 @@ For the latest builds, see [**Releases**](https://github.com/jqssun/android-tita
 
 ### Installing Extensions
 
-For Chrome extensions, navigate to [Chrome Web Store](https://chromewebstore.google.com/), enable **Desktop site** using the menu button <kbd>⋮</kbd> in the top right corner, and proceed as normal.
+You can install extensions from the following sources:
+- [Chrome Web Store (Recommended)](https://chromewebstore.google.com/)
+- [Opera Add-ons](https://addons.opera.com/)
+- [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/)
 
-For [Opera Add-ons](https://addons.opera.com/), [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/), or other marketplaces, targeted User Agent modifications may be required. See [**Titanium Extension for Android**](https://github.com/jqssun/android-titanium-extension) for instructions.
+You can also install from local CRX (or ZIP) file in the options page of the built-in [**Titanium Extension for Android**](https://github.com/jqssun/android-titanium-extension). 
 
-You can also load an unpacked extension manually by navigating to the **Manage extensions** page or [`chrome://extensions`](chrome://extensions). Enable **Developer mode**, select **Load unpacked**, and choose the folder containing the extension in the Storage Access Framework (SAF) picker. Manifest V2 (MV2) extensions are supported. It may take a moment for the extension to load.
+Additionally, you can load an unpacked extension manually for testing purposes by navigating to [`chrome://extensions`](chrome://extensions). Enable **Developer mode**, select **Load unpacked**, and choose the folder containing the extension in the Storage Access Framework (SAF) picker. It may take a moment for the extension to load.
 
 ### Using Extensions
 
 To run an extension in Incognito (OTR) mode, go to **Manage extensions**, find the extension you want to use in Incognito mode, select **Details**, and turn on **Allow in Incognito**.
 
-For advanced features including external download manager support, enhanced dark mode, and additional privacy options, you can use [**Titanium Extension for Android**](https://github.com/jqssun/android-titanium-extension).
+For advanced features including external download manager, enhanced dark mode, and additional privacy options, you can use the built-in [**Titanium Extension for Android**](https://github.com/jqssun/android-titanium-extension).
 
 ### Debug URLs
 
