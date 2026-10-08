@@ -170,6 +170,7 @@ sed -i '/        if (mIsOmniboxFocusedSupplier.get() \&\& mCurrentPosition.get()
 
 # bottom: ntp
 sed -i '/import android.view.LayoutInflater;/i\import android.view.Gravity;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/import androidx.recyclerview.widget.RecyclerView;/i\import androidx.recyclerview.widget.LinearLayoutManager;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
 sed -i '/import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;/a\import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
 sed -i '/private final CallbackController mCallbackController = new CallbackController();/a\    private final View.OnLayoutChangeListener mToolbarPositionLayoutListener =\
             (v, l, t, r, b, ol, ot, or, ob) -> updateToolbarPosition();' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
@@ -190,11 +191,21 @@ sed -i '/    \/\*\* Allows clients to listen for updates to the scroll changes o
                                 == ControlsPosition.BOTTOM;\
         mNewTabPageCoordinator.setToolbarAtBottom(bottomToolbar);\
         int minimumHeight = 0;\
-        if (bottomToolbar \&\& mFeedSurfaceProvider instanceof FeedSurfaceCoordinator coordinator) {\
+        if (mFeedSurfaceProvider instanceof FeedSurfaceCoordinator coordinator) {\
             RecyclerView recyclerView = coordinator.getRecyclerView();\
+            boolean alignToBottom =\
+                    bottomToolbar\
+                            \&\& recyclerView.getAdapter() != null\
+                            \&\& recyclerView.getAdapter().getItemCount() == 1;\
+            if (recyclerView.getLayoutManager() instanceof LinearLayoutManager layoutManager) {\
+                // Keep the search box visible when the NTP header is taller than the viewport.\
+                if (layoutManager.getStackFromEnd() != alignToBottom) {\
+                    layoutManager.setStackFromEnd(alignToBottom);\
+                    layoutManager.scrollToPosition(0);\
+                }\
+            }\
             // Fill the viewport only when the NTP header is the sole item, without a feed.\
-            if (recyclerView.getAdapter() != null\
-                    \&\& recyclerView.getAdapter().getItemCount() == 1) {\
+            if (alignToBottom) {\
                 minimumHeight =\
                         Math.max(\
                                 0,\

@@ -246,6 +246,21 @@
      }
  
      private void createAndRunNtpFocusAnimatorRefactored() {
+@@ -1625,7 +1628,13 @@
+      * new tab page.
+      */
+     private void updateButtonsTranslationY() {
+-        int transY = mTabSwitcherState == STATIC_TAB ? Math.min(mNtpSearchBoxTranslation.y, 0) : 0;
++        // NTP scroll offsets start at the top; bottom controls stay outside that scrolling area.
++        int transY =
++                mTabSwitcherState == STATIC_TAB
++                                && mBrowserControlsStateProvider.getControlsPosition()
++                                        == ControlsPosition.TOP
++                        ? Math.min(mNtpSearchBoxTranslation.y, 0)
++                        : 0;
+
+         mToolbarButtonsContainer.setTranslationY(transY);
+         mHomeButton.setTranslationY(transY);
 --- a/chrome/android/junit/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinatorUnitTest.java
 +++ b/chrome/android/junit/src/org/chromium/chrome/browser/ntp/NewTabPageCoordinatorUnitTest.java
 @@ -424,6 +424,69 @@
@@ -886,7 +901,39 @@
  
          // Progress bar params should not have changed yet; changing them mid-layout pass can cause
          // a crash.
-@@ -1276,15 +1275,15 @@
+@@ -1055,6 +1054,18 @@
+         mController.destroy();
+         setUserToolbarAnchorPreference(/* showToolbarOnTop= */ false);
+         assertControlsAtTop();
++    }
++
++    @Test
++    @DisableFeatures(ChromeFeatureList.NEW_TAB_PAGE_CUSTOMIZATION_V2)
++    public void testBottomNtpCaptureWithoutCustomization() {
++        setUserToolbarAnchorPreference(false);
++        clearInvocations(mControlContainer);
++        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ true);
++        verify(mControlContainer).doSynchronousLayout(true);
++        clearInvocations(mControlContainer);
++        mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ false);
++        verify(mControlContainer, never()).doSynchronousLayout(anyBoolean());
+     }
+
+     @Test
+@@ -1076,9 +1087,10 @@
+         // mIsFirstPositionChange is now false.
+         assertFalse(mController.getIsFirstPositionChangeForTesting());
+
+-        // 2. Test active tab is NTP.
++        // 2. Bottom NTPs need a fresh bitmap even when the layout size is unchanged.
+         mController.maybeForceBottomToolbarLayoutUpdateAndCapture(/* isNtpShowing= */ true);
+-        verify(mControlContainer, never()).doSynchronousLayout(anyBoolean());
++        verify(mControlContainer).doSynchronousLayout(true);
++        clearInvocations(mControlContainer);
+
+         // 3. Test active tab is not NTP, and layout changed.
+         // We need onToEdgeChange to return true.
+@@ -1276,15 +1288,15 @@
                  mBottomControlsStacker.getLayerForTesting(LayerType.BOTTOM_TOOLBAR);
          assertEquals(LayerVisibility.VISIBLE, toolbarLayer.getLayerVisibility());
  
@@ -1061,3 +1108,45 @@
      public void testSetMiniOriginMode_Transitions() {
          // Setup default bounds ellipsis
          when(mLocationBarDataProvider.getPageClassification(false))
+--- a/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
++++ b/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+@@ -866,12 +866,11 @@
+
+     /**
+      * Forces toolbar's layout update and capture a new toolbar bitmap when toolbar position changes
+-     * to bottom. Skips the first time when the toolbar position is set, as well as if the active
+-     * Tab is a NTP.
++     * to bottom. Skips the first time when the toolbar position is set.
+      */
+     @VisibleForTesting
+     void maybeForceBottomToolbarLayoutUpdateAndCapture(boolean isNtpShowing) {
+-        if (!mIsNtpCustomizationV2Enabled) return;
++        if (!mIsNtpCustomizationV2Enabled && !isNtpShowing) return;
+
+         if (mIsFirstPositionChange) {
+             // Skips forcing capture the first time when toolbar position is set.
+@@ -883,14 +882,7 @@
+             Log.i(TAG, "Current %s showing a NTP", isNtpShowing ? "is" : "isn't");
+         }
+
+-        if (isNtpShowing) {
+-            // On certain devices, the toolbar position could switch from top to bottom, and then
+-            // back to the top when creating a NTP. Force calling onToEdgeChange() will reset the
+-            // correct top padding which has been set on the toolbar. Since the toolbar is always
+-            // shown at the top on NTPs, skips the temporary bottom position on NTPs. See
+-            // https://crbug.com/485266759.
+-            return;
+-        } else {
++        if (!isNtpShowing) {
+             Tab tab = mActiveTabSupplier.get();
+             if (tab != null) {
+                 GURL url = tab.getUrl();
+@@ -917,7 +909,7 @@
+         // During toolbar swiping, it is possible that the toolbar's layout has been forced to
+         // update before its position is moved to the bottom. In this case, skips calling
+         // doSynchronousLayoutAndCapture() again.
+-        if (isLayoutChanged) {
++        if (isLayoutChanged || isNtpShowing) {
+             mControlContainer.doSynchronousLayout(/* forceCaptureAfterLayout= */ true);
+         }
+     }
