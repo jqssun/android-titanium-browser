@@ -154,6 +154,82 @@ fi
 # ext: app
 sed -i 's|^  "app": {$|&\n    "platforms": ["chromeos", "linux", "mac", "win"],|' chrome/common/extensions/api/_api_features.json
 
+# bottom: toolbar
+# Keep the configured position on the NTP and while editing; Chromium handles keyboard insets.
+sed -i '/        if (ntpShowing$/,/            newControlsPosition = ControlsPosition.TOP;/{s/if (ntpShowing/if (tabSwitcherShowing/; /|| tabSwitcherShowing$/d; /|| isOmniboxFocused$/d;}' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+# Refresh offsets even when focus changes while the keyboard is already visible.
+sed -i '/    private final Callback<Boolean> mFormFieldViewOffsetCallback;/a\    private final Callback<Boolean> mOmniboxViewOffsetCallback;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mKeyboardVisibilityViewOffsetCallback =$/i\        mOmniboxViewOffsetCallback =\
+                (focused) -> {\
+                    updateViewOffset(mBottomToolbarLayer, mControlContainer.getView());\
+                    updateViewOffset(mProgressBarLayer, mToolbarProgressBarContainer);\
+                };' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mIsFormFieldFocusedSupplier.addSyncObserverAndPostIfNonNull(mFormFieldViewOffsetCallback);/a\        mIsOmniboxFocusedSupplier.addSyncObserverAndPostIfNonNull(mOmniboxViewOffsetCallback);' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        mIsFormFieldFocusedSupplier.removeObserver(mFormFieldViewOffsetCallback);/a\        mIsOmniboxFocusedSupplier.removeObserver(mOmniboxViewOffsetCallback);' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+sed -i '/        if (mIsOmniboxFocusedSupplier.get() \&\& mCurrentPosition.get() == ControlsPosition.BOTTOM) {/a\            if (mControlContainer.getView().getRootWindowInsets() == null) return;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/ToolbarPositionController.java
+
+# bottom: ntp
+sed -i '/import android.view.LayoutInflater;/i\import android.view.Gravity;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/import androidx.recyclerview.widget.RecyclerView;/i\import androidx.recyclerview.widget.LinearLayoutManager;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;/a\import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/private final CallbackController mCallbackController = new CallbackController();/a\    private final View.OnLayoutChangeListener mToolbarPositionLayoutListener =\
+            (v, l, t, r, b, ol, ot, or, ob) -> updateToolbarPosition();' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        view.addOnAttachStateChangeListener(/i\        view.addOnLayoutChangeListener(mToolbarPositionLayoutListener);' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        sTotalCount++;/i\        updateToolbarPosition();\
+' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/    \/\*\* Allows clients to listen for updates to the scroll changes of the search box on the NTP. \*\//i\
+    @Override\
+    public void onControlsPositionChanged(@ControlsPosition int controlsPosition) {\
+        updateToolbarPosition();\
+        updateMargins();\
+    }\
+\
+    private void updateToolbarPosition() {\
+        boolean bottomToolbar =\
+                !mIsLff\
+                        \&\& mBrowserControlsStateProvider.getControlsPosition()\
+                                == ControlsPosition.BOTTOM;\
+        mNewTabPageCoordinator.setToolbarAtBottom(bottomToolbar);\
+        int minimumHeight = 0;\
+        if (mFeedSurfaceProvider instanceof FeedSurfaceCoordinator coordinator) {\
+            RecyclerView recyclerView = coordinator.getRecyclerView();\
+            boolean alignToBottom =\
+                    bottomToolbar\
+                            \&\& recyclerView.getAdapter() != null\
+                            \&\& recyclerView.getAdapter().getItemCount() == 1;\
+            if (recyclerView.getLayoutManager() instanceof LinearLayoutManager layoutManager) {\
+                // Keep the search box visible when the NTP header is taller than the viewport.\
+                if (layoutManager.getStackFromEnd() != alignToBottom) {\
+                    layoutManager.setStackFromEnd(alignToBottom);\
+                    layoutManager.scrollToPosition(0);\
+                }\
+            }\
+            // Fill the viewport only when the NTP header is the sole item, without a feed.\
+            if (alignToBottom) {\
+                minimumHeight =\
+                        Math.max(\
+                                0,\
+                                recyclerView.getHeight()\
+                                        - recyclerView.getPaddingTop()\
+                                        - recyclerView.getPaddingBottom());\
+            }\
+        }\
+        // A minimum height keeps taller content scrollable in landscape and split screen.\
+        if (mNewTabPageLayout.getMinimumHeight() != minimumHeight) {\
+            mNewTabPageLayout.setMinimumHeight(minimumHeight);\
+        }\
+        mNewTabPageLayout.setGravity(\
+                Gravity.CENTER_HORIZONTAL\
+                        | (minimumHeight > 0 ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL));\
+    }\
+
+' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/    private int getToolbarExtraYOffset() {/,/^    }/s/- mToolbarHeight/- (mBrowserControlsStateProvider.getControlsPosition() == ControlsPosition.TOP\n                        ? mToolbarHeight : 0)/' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+sed -i '/        mNewTabPageCoordinator.destroy();/i\        getView().removeOnLayoutChangeListener(mToolbarPositionLayoutListener);' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java
+
+# bottom: NTP focus and suggestions in bottom-toolbar coordinates.
+git apply "$SCRIPT_DIR/patches/bottom-ntp-focus.patch"
+
 # desktop: omnibox
 sed -i 's/is_desktop_android = !!BUILDFLAG(IS_DESKTOP_ANDROID);/is_desktop_android = false;/' components/omnibox/browser/zero_suggest_verbatim_match_provider.cc
 sed -i 's/is_android_mobile = is_android_any \&\& !is_android_desktop;/is_android_mobile = is_android_any \&\& is_android_desktop;/' components/omnibox/browser/autocomplete_result.cc
