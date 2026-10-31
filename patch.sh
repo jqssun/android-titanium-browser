@@ -154,6 +154,35 @@ fi
 # ext: app
 sed -i 's|^  "app": {$|&\n    "platforms": ["chromeos", "linux", "mac", "win"],|' chrome/common/extensions/api/_api_features.json
 
+# bottom: ntp
+sed -i 's|        super.onMeasure(widthMeasureSpec, heightMeasureSpec);|&\n        maybeAlignContentToBottom(widthMeasureSpec);|' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageLayout.java
+sed -i '/\/\*\* Sets the delegate instance. \*\//i\
+    private boolean mBottomAlignListenerAdded;\
+\
+    /** Aligns the content to the bottom of the viewport when the toolbar is configured at the bottom. */\
+    private void maybeAlignContentToBottom(int widthMeasureSpec) {\
+        if (!org.chromium.chrome.browser.toolbar.ToolbarPositionController.isToolbarPositionCustomizationEnabled(getContext(), false)\
+                || org.chromium.chrome.browser.toolbar.ToolbarPositionController.shouldShowToolbarOnTop(null)) {\
+            return;\
+        }\
+        android.view.ViewParent parent = getParent();\
+        while (parent != null && !(parent instanceof androidx.recyclerview.widget.RecyclerView)) parent = parent.getParent();\
+        if (parent == null) return;\
+        androidx.recyclerview.widget.RecyclerView recyclerView = (androidx.recyclerview.widget.RecyclerView) parent;\
+        // Leave the layout alone when the feed follows the header.\
+        if (recyclerView.getAdapter() == null || recyclerView.getAdapter().getItemCount() > 1) return;\
+        if (!mBottomAlignListenerAdded) {\
+            mBottomAlignListenerAdded = true;\
+            recyclerView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> { if (b - t != ob - ot) post(this::requestLayout); });\
+        }\
+        int height = recyclerView.getHeight() - recyclerView.getPaddingTop() - recyclerView.getPaddingBottom();\
+        if (height <= getMeasuredHeight()) return;\
+        setGravity(android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.BOTTOM);\
+        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));\
+    }\
+
+' chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPageLayout.java
+
 # desktop: omnibox
 sed -i 's/is_desktop_android = !!BUILDFLAG(IS_DESKTOP_ANDROID);/is_desktop_android = false;/' components/omnibox/browser/zero_suggest_verbatim_match_provider.cc
 sed -i 's/is_android_mobile = is_android_any \&\& !is_android_desktop;/is_android_mobile = is_android_any \&\& is_android_desktop;/' components/omnibox/browser/autocomplete_result.cc
