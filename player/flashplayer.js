@@ -811,7 +811,10 @@
       showControls();
       if (!g.mode) {
         if (Math.abs(dx) > Math.abs(dy)) g.mode = 'seek';
-        else g.mode = g.x0 < innerWidth / 2 ? 'light' : 'vol';
+        else {
+          const f = g.x0 / Math.max(1, innerWidth);
+          g.mode = f < 0.25 ? 'light' : f > 0.75 ? 'vol' : 'none';
+        }
       }
       if (g.mode === 'seek') {
         const span = clamp(v.duration || 60, 15, cfg.seekSpan);
@@ -823,7 +826,7 @@
         S.brightness = clamp(g.startB - dy / Math.max(1, innerHeight), 0.15, 1);
         v.style.setProperty('filter', 'brightness(' + S.brightness.toFixed(3) + ')', 'important');
         showHud('Brightness ' + Math.round(S.brightness * 100) + '%', 0);
-      } else {
+      } else if (g.mode === 'vol') {
         v.volume = clamp(g.startV - dy / Math.max(1, innerHeight), 0, 1);
         v.muted = false;
         showHud('Volume ' + Math.round(v.volume * 100) + '%', 0);

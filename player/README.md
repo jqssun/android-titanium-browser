@@ -39,8 +39,9 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
 - Settings bottom sheet (`#212121`, grab handle, 12 px top radius): playback speed
   chips 0.25–2x, Loop video, Rotate screen; each row shows its current value.
 - Gestures: tap toggles controls; double-tap +/-10 s with a circular ripple on that
-  side; long-press 2x until lift; horizontal drag seeks (90 s span) with the same
-  time bubble; left-half vertical drag is brightness, right-half is volume.
+  side; long-press 2x until lift; horizontal drag seeks (90 s span) with the target
+  time in the centre HUD; vertical drag on the left 25% is brightness, on the right
+  25% is volume, the middle band does neither.
 - CC toggles the video's subtitle/caption tracks and turns red when active.
 - Mini: rounded floating player with expand/close, draggable, tap to play/pause,
   double-tap to expand.
@@ -59,6 +60,8 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
   release -> `currentTime` 90.0 s
 - gestures: brightness drag -> `brightness(0.777)`, HUD `Brightness 78%`; volume drag
   -> 84%; long-press 700 ms -> rate 2 with HUD `2x faster`, restores the 1.5x setting
+- gesture zones (539x449, 40 px vertical drag): x=10% -> `brightness(0.911)`, x=50%
+  -> nothing changes, x=90% -> `volume` 0.911; horizontal drags seek from any x
 - settings sheet: 8 speed chips, `1x` highlighted; picking `1.5x` sets rate 1.5, closes
   the sheet and updates the row value; CC with no tracks -> HUD `No captions`
 - auto-hide: playing, controls visible at 0.5 s; top/bottom hidden at 4.1 s; center
