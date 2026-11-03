@@ -16,6 +16,10 @@ Desktop Edge/Chrome (same Blink engine as the fork), on any site with a video:
 2. Paste `flashplayer.js`, press Ctrl+Enter.
 3. A round chip appears bottom-right (or call `__flashPlayer.setAutoOpen(true)` first).
 
+Snippets run through the debugger, so this works even on sites with a strict CSP or
+Trusted Types (YouTube). Loading the file with a `<script src>` from a remote host does
+not: `script-src` rejects the host and Trusted Types rejects string sinks.
+
 Console API: `__flashPlayer.open(video?)`, `.close()`, `.toggle()`, `.pickVideo()`,
 `.setAutoOpen(b)`, `.debug()`.
 
@@ -92,7 +96,40 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
 Bugs found and fixed during this pass: rotate centring (translate order), pointer
 capture on synthetic pointers, per-frame icon/DOM writes, tap-vs-controls state,
 seek-preview being overwritten by `timeupdate` while dragging, seek glyph `fill`
-inheriting the button's `currentColor` and turning the ring into a blob.
+inheriting the button's `currentColor` and turning the ring into a blob, and markup
+sinks (icons were built with `innerHTML`/`DOMParser`, which YouTube's
+`require-trusted-types-for 'script'` policy rejects; they are now `createElementNS`
+node factories).
+
+## Verified 2026-11-04 (YouTube watch page)
+
+Environment: bundled Chromium, 539x449 viewport, `https://www.youtube.com/watch?v=jNQXAC9IVRw`
+(19.02 s VP9/AAC over MSE), script injected into the page context — a local file served
+with `Access-Control-Allow-Origin` and run through `eval` under a
+`trustedTypes.createPolicy` policy. YouTube's CSP does allow `unsafe-eval`, but only a
+TrustedScript gets through; without CORS the fetch itself is refused.
+
+- load: chip appears over YouTube's page; `open()` restyles the video inside
+  `html5-video-container` to 0,0 539x449 (`position: fixed`, `object-fit: contain`),
+  YouTube's entire chrome covered; top bar 72 px, bottom 98 px
+- title `Me at the zoo` read from `meta[name=title]` (`document.title` would read
+  "(3) Me at the zoo - YouTube")
+- MSE stream labels: total `0:19`, elapsed tracks playback (`0:05`, `0:07`)
+- seek: drag from 10% to 60% -> bubble `0:11`, fill 60%, release -> `currentTime`
+  11.41 s of 19.02, playback continues
+- settings sheet 440x186 at y 263: `1.5x` -> `playbackRate` 1.5 with the chip
+  re-highlighted and the row value updated; Loop video -> `video.loop` true, row `On`;
+  Rotate -> `translate(100vw, 0px) rotate(90deg)`, 539x449 footprint; scrim tap closes
+- CC: YouTube keeps captions outside `video.textTracks` (0 tracks) -> HUD `No captions`
+- mini 248x140 at (275,260), unchanged after 1.5 s; dragged -120/-60 -> (155,200);
+  expand restores 0,0 539x449
+- double-tap right half: 3.87 -> 14.14 s with the right ripple
+- close: host and injected CSS removed, chip back, video inline style back to YouTube's
+  own `width: 373px; height: 280px; left: 75px; top: 0px`, container style attribute
+  null, YouTube controls visible again, playback continues
+- console: no player errors; only YouTube's own ad/DNS failures, a report-only
+  `img-src` violation from its own player, and the expected "requestFullscreen ...
+  user gesture" warning from the scripted pass
 
 ## Known limits (v1)
 
@@ -106,3 +143,8 @@ inheriting the button's `currentColor` and turning the ring into a blob.
 - Page-specific overlays that are not inside the video's ancestor chain and sit at a
   higher stacking level are not hidden; the ancestor chain is raised to z-index
   2147483627 and the video to 2147483637.
+- Loading the script into a CSP/Trusted-Types site from a remote URL is refused by the
+  page (measured on YouTube: `script-src` blocks the host, `eval` needs a TrustedScript).
+  The player itself no longer uses markup sinks, and the APK route
+  (`webContents.evaluateJavaScript`) is browser-initiated, so neither policy applies to
+  it; on a desktop page use the Snippets panel.

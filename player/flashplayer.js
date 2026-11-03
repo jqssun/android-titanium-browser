@@ -33,21 +33,50 @@
     dblTap: 300
   };
 
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  /* Icons are created as SVG nodes rather than assigned as markup: pages under a
+     require-trusted-types-for 'script' policy (YouTube) reject innerHTML, DOMParser
+     and eval of strings, but attribute sets are not sinks. Each entry is a factory
+     so a node is never shared between two parents. */
+  function node(tag, attrs, kids) {
+    const n = document.createElementNS(SVGNS, tag);
+    if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (kids) for (const c of kids) n.appendChild(c);
+    return n;
+  }
+
+  const tri = (d) => () => node('svg', { viewBox: '0 0 24 24' }, [node('path', { d })]);
   const SVG = {
-    play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
-    pause: '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
-    back: '<svg viewBox="0 0 24 24"><path d="M15.7 7.4 14.3 6 8.3 12l6 6 1.4-1.4L11.1 12z"/></svg>',
-    replay: '<svg viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z"/></svg>',
-    forward: '<svg viewBox="0 0 24 24"><g transform="translate(24,0) scale(-1,1)"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z"/></g></svg>',
-    cc: '<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="12" y="15.2" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" font-family="Roboto,system-ui,sans-serif">CC</text></svg>',
-    gear: '<svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>',
-    fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5v2H6v3zm16 0V4h-5v2h3v3zM4 15v5h5v-2H6v-3zm16 0v5h-5v-2h3v-3z"/></svg>',
-    fsExit: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4V7h3V4zm6 0v5h5V7h-3V4zM9 20v-5H4v2h3v3zm6 0v-5h5v2h-3v3z"/></svg>',
-    mini: '<svg viewBox="0 0 24 24"><path d="M3 5h18v14H3V5zm11 8h5v4h-5v-4z"/></svg>',
-    close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
-    rotate: '<svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>',
-    loop: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg>',
-    speed: '<svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6V4z"/><path d="M16.4 7.6 12 12l1.4 1.4 4.4-4.4z"/></svg>'
+    play: () => node('svg', { viewBox: '0 0 24 24' }, [node('path', { d: 'M8 5v14l11-7z' })]),
+    pause: () => node('svg', { viewBox: '0 0 24 24' }, [node('path', { d: 'M6 5h4v14H6zm8 0h4v14h-4z' })]),
+    back: tri('M15.7 7.4 14.3 6 8.3 12l6 6 1.4-1.4L11.1 12z'),
+    replay: tri('M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z'),
+    forward: () => node('svg', { viewBox: '0 0 24 24' }, [
+      node('g', { transform: 'translate(24,0) scale(-1,1)' },
+        [node('path', { d: 'M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z' })])
+    ]),
+    cc: () => node('svg', { viewBox: '0 0 24 24' }, [
+      node('rect', { x: '2.5', y: '5', width: '19', height: '14', rx: '2.2',
+        fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5' }),
+      node('text', { x: '12', y: '15.2', 'font-size': '7', 'font-weight': '700',
+        'text-anchor': 'middle', fill: 'currentColor', 'font-family': 'Roboto,system-ui,sans-serif' },
+        [document.createTextNode('CC')])
+    ]),
+    gear: tri('M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z'),
+    fs: tri('M4 9V4h5v2H6v3zm16 0V4h-5v2h3v3zM4 15v5h5v-2H6v-3zm16 0v5h-5v-2h3v-3z'),
+    fsExit: tri('M9 4v5H4V7h3V4zm6 0v5h5V7h-3V4zM9 20v-5H4v2h3v3zm6 0v-5h5v2h-3v3z'),
+    mini: tri('M3 5h18v14H3V5zm11 8h5v4h-5v-4z'),
+    close: () => node('svg', { viewBox: '0 0 24 24' }, [
+      node('path', { d: 'M6 6l12 12M18 6L6 18', stroke: 'currentColor',
+        'stroke-width': '2.2', fill: 'none', 'stroke-linecap': 'round' })
+    ]),
+    rotate: tri('M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z'),
+    loop: tri('M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z'),
+    speed: () => node('svg', { viewBox: '0 0 24 24' }, [
+      node('path', { d: 'M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6V4z' }),
+      node('path', { d: 'M16.4 7.6 12 12l1.4 1.4 4.4-4.4z' })
+    ])
   };
 
   const CSS = `
@@ -135,12 +164,14 @@
 .chip.on{background:#f00}
 `;
 
-  const el = (tag, cls, html) => {
+  const el = (tag, cls, text) => {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
-    if (html != null) e.innerHTML = html;
+    if (text != null) e.textContent = text;
     return e;
   };
+
+  function setIcon(box, make) { box.replaceChildren(make()); }
 
   const fmt = (t) => {
     if (!isFinite(t) || t < 0) t = 0;
@@ -265,10 +296,19 @@
 
   /* ---------- UI ---------- */
 
-  function btn(cls, html, label) {
-    const b = el('button', 'btn ' + cls, html);
+  function btn(cls, markup, label) {
+    const b = el('button', 'btn ' + cls);
     b.type = 'button';
+    if (markup) b.appendChild(markup());
     if (label) b.setAttribute('aria-label', label);
+    return b;
+  }
+
+  function srow(markup, label, val) {
+    const b = el('button', 'srow');
+    b.type = 'button';
+    const v = el('span', 'val', val);
+    b.append(markup(), el('span', null, label), v);
     return b;
   }
 
@@ -285,13 +325,15 @@
 
     const surface = el('div', 'surface');
     const hud = el('div', 'hud');
-    const ripL = el('div', 'ripple left', SVG.replay);
-    const ripR = el('div', 'ripple right', SVG.forward);
+    const ripL = el('div', 'ripple left');
+    const ripR = el('div', 'ripple right');
+    ripL.appendChild(SVG.replay());
+    ripR.appendChild(SVG.forward());
     S.root.append(surface, hud, ripL, ripR);
 
     const top = el('div', 'layer top');
     const back = btn('', SVG.back, 'Back');
-    const title = el('span', 'title', '');
+    const title = el('span', 'title');
     const mini = btn('', SVG.mini, 'Minimize');
     top.append(back, title, el('span', 'grow'), mini);
 
@@ -331,7 +373,7 @@
     const sheetWrap = el('div', 'sheet-wrap');
     const sheetBg = el('div', 'sheet-bg');
     const sheet = el('div', 'sheet');
-    const rowSpeed = el('button', 'srow', SVG.speed + '<span>Playback speed</span><span class="val">1x</span>');
+    const rowSpeed = srow(SVG.speed, 'Playback speed', '1x');
     const grid = el('div', 'sgrid');
     for (const r of [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
       const c = el('button', 'chip', (Number.isInteger(r) ? r : r.toFixed(2)) + 'x');
@@ -339,8 +381,8 @@
       c.dataset.rate = String(r);
       grid.appendChild(c);
     }
-    const rowLoop = el('button', 'srow', SVG.loop + '<span>Loop video</span><span class="val">Off</span>');
-    const rowRot = el('button', 'srow', SVG.rotate + '<span>Rotate screen</span><span class="val">Off</span>');
+    const rowLoop = srow(SVG.loop, 'Loop video', 'Off');
+    const rowRot = srow(SVG.rotate, 'Rotate screen', 'Off');
     for (const b of [rowSpeed, rowLoop, rowRot]) b.type = 'button';
     sheet.append(el('div', 'grab'), rowSpeed, grid, rowLoop, rowRot);
     sheetWrap.append(sheetBg, sheet);
@@ -402,7 +444,7 @@
 
   function syncFsIcon() {
     const onFs = !!document.fullscreenElement;
-    S.ui.fs.innerHTML = onFs ? SVG.fsExit : SVG.fs;
+    setIcon(S.ui.fs, onFs ? SVG.fsExit : SVG.fs);
     if (!onFs) {
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (_) {}
     }
@@ -602,10 +644,10 @@
       S.pausedIcon = v.paused;
       const ic = v.paused ? SVG.play : SVG.pause;
       const label = v.paused ? 'Play' : 'Pause';
-      S.ui.main.innerHTML = ic;
-      S.ui.play.innerHTML = ic;
       S.ui.main.setAttribute('aria-label', label);
       S.ui.play.setAttribute('aria-label', label);
+      setIcon(S.ui.main, ic);
+      setIcon(S.ui.play, ic);
     }
     syncCenter();
   }
@@ -970,7 +1012,11 @@
     syncLoop();
     syncRot();
     syncCC();
-    S.ui.title.textContent = (document.title || '').trim() || v.currentSrc.split('/').pop() || 'Video';
+    /* YouTube puts the clip name in <meta name=title>; document.title carries a
+       " - YouTube" suffix and, with pending notifications, a "(3) " prefix. */
+    const metaTitle = document.querySelector('meta[name="title"]');
+    S.ui.title.textContent = ((metaTitle && metaTitle.content) || document.title || '').trim() ||
+      v.currentSrc.split('/').pop() || 'Video';
     S.active = true;
     chip(false);
     showControls();
@@ -1041,7 +1087,7 @@
     `;
     const b = document.createElement('button');
     b.setAttribute('aria-label', 'Open video player');
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>UC</span>';
+    b.append(SVG.play(), el('span', null, 'UC'));
     b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); open(); });
     root.append(st, b);
     (document.body || document.documentElement).appendChild(host);
