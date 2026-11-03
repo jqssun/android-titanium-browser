@@ -50,8 +50,11 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
 - Mini: a `min(380, 46% of the viewport)` wide, 16:9 floating card with 10 px rounded
   corners (the video gets the radius inline, the overlay layer is clipped by a
   document-level `#fp-host.mini` rule, which is the only thing that can beat the host's
-  inline `all:initial`), with expand/close, draggable, tap to play/pause, double-tap to
-  expand.
+  inline `all:initial`), draggable. Its only controls are the expand (fullscreen) glyph
+  dead-centre and the cross at the top right, both plain icons with no disc behind them.
+  A tap shows them and they auto-hide again after the same 3.5 s; a drag moves the card
+  and re-arms the timer; double-tap expands. There is no play/pause in mini — pausing
+  means expanding first.
 - Keys (desktop): space/k, arrows, j/l, m, f, esc.
 
 ## Verified 2026-11-04 (YouTube-style chrome)
@@ -87,6 +90,12 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
   348,260 311x175; dragged to (228,160), expand gives 0,0 675x449 with the clip released
   back to `0px`/`visible`, close leaves no `#fp-host` and no `#fp-css` and an empty style
   attribute on the video
+- mini controls: expand box 486,330 36x36 — centre (504,348) is the card centre, cross at
+  621,262 with its right edge 2 px inside the card, both `background: rgba(0,0,0,0)`;
+  layer opacity 0 with class `off` 4.2 s after entering mini, 0.98 after a single tap
+  (which left `paused` false, i.e. tap no longer plays/pauses), 0 again 4.2 s later; a
+  drag to 268,220 left them hidden; double-tap 90 ms apart expanded to 675x449 and the
+  cross closed the player cleanly
 - rotate: `translate(100vw,0) rotate(90deg)`, bounding box 0,0 539x448, controls
   upright; toggling Off restores the full-viewport layout
 - back chevron closes; restore leaves the video at 476x268 (24,72), page transform

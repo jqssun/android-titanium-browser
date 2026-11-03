@@ -135,11 +135,14 @@
   padding:9px 14px;border-radius:8px;font-size:14px;font-weight:500;opacity:0;
   transition:opacity .18s;pointer-events:none;white-space:nowrap}
 .hud.on{opacity:1}
-.mini-ctl{top:calc(6px + env(safe-area-inset-top));right:4px;display:none;justify-content:flex-end;gap:0}
-.mini-ctl .btn{width:40px;height:40px;background:#0007}
-.mini-ctl .btn svg{width:20px;height:20px}
+.mini-ctl{inset:0;display:none}
+.mini-ctl .btn{position:absolute;width:36px;height:36px;background:transparent}
+.mini-ctl .btn:active{background:transparent}
+.mini-ctl .btn svg{width:22px;height:22px;filter:drop-shadow(0 1px 5px #000b)}
+.mini-ctl .expand{left:50%;top:50%;margin:-18px 0 0 -18px}
+.mini-ctl .close{right:2px;top:calc(2px + env(safe-area-inset-top))}
 :host(.mini) .top,:host(.mini) .center,:host(.mini) .bottom,:host(.mini) .sheet-wrap{display:none}
-:host(.mini) .mini-ctl{display:flex}
+:host(.mini) .mini-ctl{display:block}
 :host(.mini) .surface{cursor:move}
 .sheet-wrap{position:absolute;inset:0;display:none;pointer-events:none}
 .sheet-wrap.open{display:block}
@@ -366,8 +369,8 @@
     bottom.append(tr, actions);
 
     const miniCtl = el('div', 'layer mini-ctl');
-    const expand = btn('', SVG.fs, 'Expand');
-    const closeMini = btn('', SVG.close, 'Close player');
+    const expand = btn('expand', SVG.fs, 'Expand');
+    const closeMini = btn('close', SVG.close, 'Close player');
     miniCtl.append(expand, closeMini);
 
     const sheetWrap = el('div', 'sheet-wrap');
@@ -625,6 +628,7 @@
     S.controls = true;
     S.ui.top.classList.remove('off');
     S.ui.bottom.classList.remove('off');
+    if (S.ui.miniCtl) S.ui.miniCtl.classList.remove('off');
     syncCenter();
     scheduleHide();
   }
@@ -635,15 +639,16 @@
     S.ui.top.classList.add('off');
     S.ui.bottom.classList.add('off');
     S.ui.center.classList.add('off');
+    if (S.ui.miniCtl) S.ui.miniCtl.classList.add('off');
     S.centerShown = false;
     clearTimeout(S.hideTimer);
   }
 
   function scheduleHide() {
     clearTimeout(S.hideTimer);
-    if (S.mini || S.sheetOpen) return;
+    if (S.sheetOpen) return;
     S.hideTimer = setTimeout(() => {
-      if (S.video && !S.video.paused && S.controls && !S.g) hideControls();
+      if (S.video && S.controls && !S.g && (S.mini || !S.video.paused)) hideControls();
     }, cfg.hideDelay);
   }
 
@@ -875,7 +880,7 @@
       }
 
       if (g.mini) {
-        if (tap) handleTap(g);
+        if (tap) handleTap(g); else scheduleHide();
         return;
       }
 
@@ -924,7 +929,6 @@
     S.lastTap = now;
     clearTimeout(S.tapTimer);
     S.tapTimer = setTimeout(() => {
-      if (S.mini) { if (v.paused) v.play().catch(() => {}); else v.pause(); return; }
       if (g.wasControls) hideControls(); else showControls();
     }, cfg.dblTap);
   }
