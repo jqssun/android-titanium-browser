@@ -240,6 +240,80 @@ policy object was needed (43,691 bytes in, `[flashplayer] 0.1.0 ready` logged).
 - console for the whole pass: our ready log and the expected `requestFullscreen ...
   user gesture` warning — no player errors
 
+## Verified 2026-11-04 (xnxx: HLS.js `blob:` stream plus a 0x0 decoy `<video>`)
+
+Environment: bundled Chromium, **540x448** viewport, a `/video-…/<id>/…` watch page whose
+stream is fed by HLS.js into a `blob:` src. No CSP `meta`, but the **response header**
+carries one: `default-src 'self' data: 'unsafe-inline' 'unsafe-eval' blob: …`, so
+`fetch('http://127.0.0.1:8765/flashplayer.js')` was refused — `connect-src` falls back to
+`default-src`, and the console logged both the directive error and
+`Refused to connect because it violates the document's Content Security Policy`.
+`eval` itself is allowed, so delivery is the only problem: the source was handed to the
+page as a **text payload read in-page** (48,515 chars in, all 11
+`__flashPlayer` keys, `[flashplayer] 0.1.0 ready`). This is exactly the APK path — the
+injector supplies the source, it never fetches it.
+
+- the page has **2** `<video>` elements: index 0 is a 0x0 ad node (`duration` 0.63,
+  `readyState` 4, `paused`), index 1 the live stream (524x427, 689.29 s, `blob:`).
+  `pickVideo()` returned index 1. Any probe that uses `document.querySelector('video')`
+  measures the ad node instead — identity has to be taken from the z-index the overlay
+  writes
+- 0 `textTracks`, so auto-detection gives 0 bands, as on the other sites
+- layout at open: host fixed 540x448 covering the viewport, video 540x448 with the
+  overlay's 559-char inline style, video z 2147483637 inside host z 2147483647, seek
+  track 424 px with children in order `buf, segs, fil, knob, tip`
+- nothing fights us for the element: 8 samples over 28 s — style length constant at 559,
+  `100vw` still present, video and host width constant 540, and the centre hit-test
+  returned `#fp-host` in every sample. `currentTime` advanced 149 -> 156 s unattended
+- segments: `setSegments()` of 5 bands over 689.289 s -> first `left 0% width 17.409%`
+  (= 120/689.289) with the explicit `#e91e63`, last `left 81.243% width 18.757%` on the
+  palette default, `debug().segments` 5
+- scrub: `currentTime` 344.64 of 689.289 = 50.0% -> knob and fill both `49.999%`. The tab
+  was `document.hidden`, so rAF was frozen and only the seek/pause event path repainted —
+  reading immediately shows the pre-seek `23.095%`, re-reading shows the truth
+- mini: 248x140 at (275,260) — `min(380, 46% x 540)` x 16:9, right-inset 16, 58% down;
+  `border-radius: 10px`, mini row `display:block`; expand -> host 539 px again
+- close/restore: this site writes its **own** style on the video, and writes it oddly —
+  the attribute literally contains quote characters, `"transform: scaleX(1);"`. It came
+  back byte-identical after every cycle. Three cycles (open/close, open/mini/close,
+  reopen with the site style already restored) all leave the video plus 8 ancestors
+  byte-identical, 0 `#fp-host`, no `#fp-css`, and the site's player carried on (345 ->
+  387 s)
+- console for the whole pass: 260 logs of the site's own HLS.js/ad-SDK chatter, **0
+  warnings, 2 errors, both my localhost fetch probe**
+
+## Verified 2026-11-04 (sexvid: splash-gated player, one `<video>` reused for the ad)
+
+Environment: bundled Chromium, **539x448** viewport, watch page `/…-…-….html` that
+canonicalizes to the bare slug. Player is `#kt_player`; no CSP `meta`,
+`window.trustedTypes` present but not enforced. Same in-page text-payload injection as
+above (48,515 chars).
+
+- the page loads with **no player at all**: `#kt_player.is-splash` and a
+  `Resume watching` button. Only a same-origin ad iframe (`native_code`, 504x150) holds
+  2 videos — invisible to us, which is the documented main-frame limit
+- after the gate: exactly **1** main-frame `<video>`, first a 30.0 s pre-roll creative,
+  then the **same element** carrying the content stream (`duration` 874 s) — the labels
+  followed without a reopen, as on the other ad site. 0 `textTracks`
+- layout at open: host and video 539x448, overlay style 593 chars, track 423 px, order
+  `buf, segs, fil, knob, tip`
+- the site did not take the element back: over the sampler run the style stayed 593 chars
+  with `100vw`, centre hit-test `#fp-host`, and a synthetic `window` `resize` event left
+  the style byte-for-byte unchanged (593 -> 593)
+- segments: `setSegments()` of 4 bands over 874 s -> `0% / 10.296%`, `10.296% / 24.025%`,
+  `34.321% / 34.321%`, `68.643% / 31.347%` — contiguous, explicit `#00e5ff` honoured
+- scrub: `currentTime` 437 of 874 = 50.0% -> knob and fill `49.995%`
+- mini: 248x140 at (275,260), **exactly** the formula values, radius 10 px, expand -> 539
+- close/restore: the video had **no** style attribute before open and none after
+  (`[style=""]` count 0 on the whole document); the 10-node chain came back
+  byte-identical, only `#fp-chip` (54x54, bottom-right, `display:block`) remains, and the
+  site's player resumed at 437 -> 438.2 s with `#kt_player` still 504 px wide
+- chip reopen verified here: clicking the chip's shadow button (the listener is on the
+  inner `button`, not on `#fp-chip`) re-opens to 539x448 and hides the chip; closing with
+  `Close player` restores byte-identically a second time
+- console for the whole pass: **0 errors**; 5 warnings, all `ads.exoclick.com ... Failed
+  to execute 'write' on 'Document'` from the site's own ad SDK, plus our single ready log
+
 ## Known limits (v1)
 
 - Main frame only. Measured: a video in a same-origin iframe is invisible to the
@@ -258,12 +332,16 @@ policy object was needed (43,691 bytes in, `[flashplayer] 0.1.0 ready` logged).
   row back to Off on a landscape stream in a landscape viewport). Unresolved design
   question, not a crash.
 - Track segments are bands only: no chapter name on hover and no jump-to-next-chapter.
-  Automatic detection reads `video.textTracks` with `kind="chapters"`, which neither
-  YouTube nor the tested site exposes (both measured at 0 tracks), so on those sites the
-  bands appear only when the APK pushes `setSegments()`; the detection polls up to 8
-  times (first at 250 ms, then 1 s apart) and gives up after that.
+  Automatic detection reads `video.textTracks` with `kind="chapters"`, which is empty on
+  every site tested so far — YouTube, the JS-player site, xnxx and sexvid all measured at
+  0 tracks — so on those sites the bands appear only when the APK pushes `setSegments()`;
+  the detection polls up to 8 times (first at 250 ms, then 1 s apart) and gives up after
+  that.
 - Loading the script into a CSP/Trusted-Types site from a remote URL is refused by the
-  page (measured on YouTube: `script-src` blocks the host, `eval` needs a TrustedScript).
+  page (measured on YouTube: `script-src` blocks the host, `eval` needs a TrustedScript;
+  measured on xnxx: no `meta` but a response-header `default-src 'self' … 'unsafe-eval'`,
+  under which `connect-src` falls back and blocks even a localhost `fetch`, while `eval`
+  is allowed).
   The player itself no longer uses markup sinks, and the APK route
   (`webContents.evaluateJavaScript`) is browser-initiated, so neither policy applies to
   it; on a desktop page use the Snippets panel.
