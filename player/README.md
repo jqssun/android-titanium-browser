@@ -36,6 +36,10 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
   total time. Dragging widens the track, enlarges the knob and shows a time bubble.
 - Actions row: play/pause, -10 s, +10 s double chevrons (left); CC, settings,
   fullscreen (right). The center play/pause button appears only while paused.
+- Fullscreen follows the video's shape: a real screen-orientation lock to landscape
+  for a wide video and to portrait for a tall one. Where the page cannot enter real
+  fullscreen, the orientation cannot be changed either, so a wide video on a portrait
+  screen is stood up with the CSS rotation instead.
 - Settings bottom sheet (`#212121`, grab handle, 12 px top radius): playback speed
   chips 0.25–2x, Loop video, Rotate screen; each row shows its current value.
 - Gestures: tap toggles controls; double-tap +/-10 s with a circular ripple on that
@@ -62,6 +66,10 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
   -> 84%; long-press 700 ms -> rate 2 with HUD `2x faster`, restores the 1.5x setting
 - gesture zones (539x449, 40 px vertical drag): x=10% -> `brightness(0.911)`, x=50%
   -> nothing changes, x=90% -> `volume` 0.911; horizontal drags seek from any x
+- fullscreen orientation (fallback path — this browser refuses real fullscreen): wide
+  640x360 video on a 539x449 viewport -> no rotation, video 539x449; the same video on
+  a 412x915 viewport -> `translate(100vw, 0px) rotate(90deg)` with the Rotate row `On`,
+  second click back to `none`; tall 180x320 video -> no rotation, `object-fit: contain`
 - settings sheet: 8 speed chips, `1x` highlighted; picking `1.5x` sets rate 1.5, closes
   the sheet and updates the row value; CC with no tracks -> HUD `No captions`
 - auto-hide: playing, controls visible at 0.5 s; top/bottom hidden at 4.1 s; center
@@ -141,8 +149,9 @@ TrustedScript gets through; without CORS the fetch itself is refused.
   behave the same. Needs a `RenderFrameObserver` in `chrome/renderer` (v2).
 - Fullscreen and orientation lock need a real user activation; the in-app test
   browser refuses `requestFullscreen()` even from a trusted key press, so only the
-  CSS full-viewport fallback was exercised (already pixel-identical). A real tap on
-  the fullscreen button in the fork is the activation path to check on device.
+  CSS fallback was exercised (already pixel-identical). The lock target is chosen by
+  the video's shape (`portrait` when taller than wide, else `landscape`), but the lock
+  call itself can only be checked with a real tap in the fork on device.
 - Page-specific overlays that are not inside the video's ancestor chain and sit at a
   higher stacking level are not hidden; the ancestor chain is raised to z-index
   2147483627 and the video to 2147483637.

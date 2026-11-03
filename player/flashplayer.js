@@ -450,15 +450,41 @@
     }
   }
 
+  function videoTall() {
+    const v = S.video;
+    const w = v.videoWidth || v.clientWidth || 0;
+    const h = v.videoHeight || v.clientHeight || 0;
+    return h > w;
+  }
+
+  function setRotated(on) {
+    S.rotated = on;
+    applyRotate(on);
+    syncRot();
+  }
+
   async function toggleFs() {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else {
+    /* Fullscreen follows the video: landscape for a wide video, portrait for a
+       tall one. If the page cannot enter real fullscreen the orientation cannot
+       be changed either, so a wide video on a portrait screen is stood up with
+       the CSS rotation instead. */
+    const tall = videoTall();
+
+    if (!document.fullscreenElement) {
+      let real = false;
+      try {
         await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-        try { await screen.orientation.lock('landscape'); } catch (_) {}
-      }
-    } catch (_) {}
-    applyVideoFull();
+        real = !!document.fullscreenElement;
+        if (real) {
+          try { await screen.orientation.lock(tall ? 'portrait' : 'landscape'); } catch (_) {}
+        }
+      } catch (_) {}
+      setRotated(!real && !tall && innerHeight > innerWidth);
+    } else {
+      try { await document.exitFullscreen(); } catch (_) {}
+      try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (_) {}
+      setRotated(false);
+    }
     syncFsIcon();
   }
 
