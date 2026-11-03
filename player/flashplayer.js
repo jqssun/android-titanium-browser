@@ -1082,12 +1082,10 @@
         transition:transform .12s}
       button:active{transform:scale(.92)}
       svg{width:24px;height:24px;fill:#fff;margin-left:2px}
-      span{position:absolute;right:0;bottom:-2px;background:#000c;color:#fff;font:700 10px/1
-        system-ui,sans-serif;padding:4px 6px;border-radius:8px;pointer-events:none}
     `;
     const b = document.createElement('button');
     b.setAttribute('aria-label', 'Open video player');
-    b.append(SVG.play(), el('span', null, 'UC'));
+    b.append(SVG.play());
     b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); open(); });
     root.append(st, b);
     (document.body || document.documentElement).appendChild(host);
