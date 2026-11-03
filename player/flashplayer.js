@@ -108,6 +108,8 @@
 .seek.drag .track{height:5px}
 .buf,.fil{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
 .buf{background:#ffffff66}
+.segs{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.seg{position:absolute;top:0;bottom:0}
 .fil{background:#f00}
 .knob{position:absolute;top:50%;left:0;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;
   background:#f00;transition:width .12s,height .12s,margin .12s,box-shadow .12s}
@@ -194,7 +196,8 @@
     hideTimer: 0, raf: 0, tapTimer: 0, lastTap: 0, held: false, holdTimer: 0,
     hudTimer: 0, g: null, seekPreview: -1, savedRate: 1, miniRect: null,
     ui: {}, ac: null, pausedIcon: null, timeText: '', durText: '', bufWidth: '', fileWidth: '',
-    flashUntil: 0, centerShown: null, sheetOpen: false, seeking: false
+    flashUntil: 0, centerShown: null, sheetOpen: false, seeking: false,
+    segments: [], segsFor: null, segTry: 0, segNext: 0, segModes: new Map()
   };
 
   /* ---------- page state save / restore ---------- */
@@ -205,8 +208,11 @@
 
   function restore() {
     for (const [e, css] of S.saved) {
-      if (css == null) e.removeAttribute('style');
-      else e.setAttribute('style', css);
+      if (css) { e.setAttribute('style', css); continue; }
+      e.removeAttribute('style');
+      /* Blink can re-serialise an empty style attribute while the inline mutations
+         queued during the overlay flush, so verify the node is really clean. */
+      if (e.getAttribute('style') === '') e.removeAttribute('style');
     }
     S.saved.clear();
   }
@@ -351,10 +357,11 @@
     const seek = el('div', 'seek');
     const track = el('div', 'track');
     const buf = el('div', 'buf');
+    const segs = el('div', 'segs');
     const fil = el('div', 'fil');
     const knob = el('div', 'knob');
     const tip = el('div', 'tip', '0:00');
-    track.append(buf, fil, knob, tip);
+    track.append(buf, segs, fil, knob, tip);
     seek.appendChild(track);
     tr.append(time, seek, dur);
 
@@ -394,7 +401,7 @@
 
     Object.assign(S.ui, {
       surface, hud, ripL, ripR, top, back, title, mini, center, main, bottom, tr,
-      time, dur, seek, track, buf, fil, knob, tip, actions, play, rew, fwd, cc, gear, fs,
+      time, dur, seek, track, buf, segs, fil, knob, tip, actions, play, rew, fwd, cc, gear, fs,
       miniCtl, expand, closeMini, sheetWrap, sheetBg, sheet, rowSpeed, grid, rowLoop, rowRot,
       valSpeed: rowSpeed.querySelector('.val'),
       valLoop: rowLoop.querySelector('.val'),
@@ -557,7 +564,22 @@
   function ccShowing() {
     const list = S.video && S.video.textTracks;
     if (!list) return false;
-    for (let i = 0; i < list.length; i++) if (list[i].mode === 'showing') return true;
+    for (let i = 0; i < list.length; i++) {
+      const k = list[i].kind;
+      if ((k === 'subtitles' || k === 'captions') && list[i].mode === 'showing') return true;
+    }
+    return false;
+  }
+
+  /* Chapter/metadata tracks are not captions, and a page that only has those must still
+   report "No captions" instead of switching nothing and claiming it turned on. */
+  function hasCC() {
+    const list = S.video && S.video.textTracks;
+    if (!list) return false;
+    for (let i = 0; i < list.length; i++) {
+      const k = list[i].kind;
+      if (k === 'subtitles' || k === 'captions') return true;
+    }
     return false;
   }
 
@@ -570,7 +592,7 @@
 
   function toggleCC() {
     const list = S.video && S.video.textTracks;
-    if (!list || !list.length) { showHud('No captions', 900); return; }
+    if (!hasCC()) { showHud('No captions', 900); return; }
     const on = !ccShowing();
     for (let i = 0; i < list.length; i++) {
       const t = list[i];
@@ -670,7 +692,7 @@
       if (tc !== S.timeText) { S.timeText = tc; S.ui.time.textContent = tc; }
     }
     const td = d ? fmt(d) : '0:00';
-    if (td !== S.durText) { S.durText = td; S.ui.dur.textContent = td; }
+    if (td !== S.durText) { S.durText = td; S.ui.dur.textContent = td; renderSegments(); }
     if (S.pausedIcon !== v.paused) {
       S.pausedIcon = v.paused;
       const ic = v.paused ? SVG.play : SVG.pause;
@@ -681,6 +703,10 @@
       setIcon(S.ui.play, ic);
     }
     syncCenter();
+    if (!S.segments.length && S.segTry < 8 && performance.now() > S.segNext) {
+      S.segNext = performance.now() + (S.segTry ? 1000 : 250);
+      if (wakeChapters()) { S.segTry++; refreshSegments(); }
+    }
   }
 
   function syncBuffered() {
@@ -692,6 +718,94 @@
     for (let i = 0; i < v.buffered.length; i++) end = Math.max(end, v.buffered.end(i));
     const w = (clamp(end / d, 0, 1) * 100).toFixed(2) + '%';
     if (w !== S.bufWidth) { S.bufWidth = w; S.ui.buf.style.width = w; }
+  }
+
+  /* ---------- track segments ---------- */
+
+  const SEG_COLORS = ['#8e24aa', '#00897b', '#f4511e', '#3949ab', '#43a047', '#c0ca33'];
+
+  function renderSegments() {
+    const box = S.ui.segs, v = S.video;
+    if (!box) return;
+    const d = v && v.duration;
+    box.replaceChildren();
+    if (!d || !isFinite(d) || !S.segments.length) return;
+    S.segments.forEach((s, i) => {
+      const a = clamp(s.start / d, 0, 1), b = clamp(s.end / d, 0, 1);
+      if (b <= a) return;
+      const n = el('div', 'seg');
+      n.style.left = (a * 100).toFixed(3) + '%';
+      n.style.width = ((b - a) * 100).toFixed(3) + '%';
+      n.style.background = s.color || SEG_COLORS[i % SEG_COLORS.length];
+      box.appendChild(n);
+    });
+  }
+
+  /* A kind=chapters text track is the only segment source a page hands over by itself;
+   its cues are parsed by the browser, so nothing here reads the file. TextTrackList has
+   no Symbol.iterator, so every walk over it is indexed. Chrome only parses it once the
+   track is showing, and chapters cues are never painted, so the mode is raised for the
+   read — which is also why ccShowing() ignores kinds that are not captions. */
+  function wakeChapters() {
+    const list = S.video && S.video.textTracks;
+    if (!list) return false;
+    let found = false;
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      if (t.kind !== 'chapters') continue;
+      found = true;
+      if (t.cues && t.cues.length) continue;
+      if (!S.segModes.has(t)) S.segModes.set(t, t.mode);
+      t.mode = t.mode === 'disabled' ? 'hidden' : 'showing';
+    }
+    return found;
+  }
+
+  /* Hand the tracks we raised for the cue read back to the mode the page had. */
+  function sleepChapters() {
+    for (const [t, mode] of S.segModes) {
+      try { t.mode = mode; } catch (_) {}
+    }
+    S.segModes.clear();
+  }
+
+  function chaptersFromTracks() {
+    const list = S.video && S.video.textTracks;
+    if (!list) return null;
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      if (t.kind !== 'chapters') continue;
+      const cues = t.cues;
+      if (!cues || !cues.length) continue;
+      const out = [];
+      for (let j = 0; j < cues.length; j++) {
+        out.push({ start: cues[j].startTime, end: cues[j].endTime, label: cues[j].text, color: '' });
+      }
+      return out;
+    }
+    return null;
+  }
+
+  function refreshSegments() {
+    if (S.segsFor !== S.video) {
+      S.segsFor = S.video;
+      S.segments = [];
+    }
+    if (!S.segments.length) {
+      wakeChapters();
+      const ch = chaptersFromTracks();
+      if (ch) { S.segments = ch; S.segsFor = S.video; }
+    }
+    renderSegments();
+  }
+
+  function setSegments(list) {
+    S.segments = (list || [])
+      .map((s) => ({ start: Number(s.start), end: Number(s.end), label: s.label || '', color: s.color || '' }))
+      .filter((s) => isFinite(s.start) && isFinite(s.end) && s.end > s.start);
+    S.segsFor = S.video;
+    if (S.active) renderSegments();
+    return S.segments.length;
   }
 
   function syncRate() {
@@ -1035,6 +1149,8 @@
     S.durText = '';
     S.bufWidth = '';
     S.fileWidth = '';
+    S.segTry = 0;
+    S.segNext = 0;
     S.ac = new AbortController();
 
     store(v);
@@ -1042,6 +1158,7 @@
     applyAncestors();
     buildUI();
     bindMedia();
+    refreshSegments();
     sync();
     syncBuffered();
     syncRate();
@@ -1076,6 +1193,7 @@
     if (S.hideCss && S.hideCss.parentNode) S.hideCss.parentNode.removeChild(S.hideCss);
     S.host = null; S.root = null; S.hideCss = null; S.ui = {};
     restore();
+    sleepChapters();
     S.video = null;
     S.mini = false;
     S.rotated = false;
@@ -1184,6 +1302,7 @@
     toggle,
     chip,
     pickVideo,
+    setSegments,
     setAutoOpen(b) { cfg.autoOpen = !!b; if (b) scan(); return cfg.autoOpen; },
     get autoOpen() { return cfg.autoOpen; },
     config: cfg,
@@ -1191,7 +1310,8 @@
       return { active: S.active, mini: S.mini, controls: S.controls, held: S.held,
         g: S.g && { id: S.g.id, mode: S.g.mode, moved: S.g.moved, mini: !!S.g.mini },
         holdTimer: S.holdTimer, rate: S.video && S.video.playbackRate,
-        hostClass: S.host && S.host.className, brightness: S.brightness };
+        hostClass: S.host && S.host.className, brightness: S.brightness,
+        segments: S.segments.length };
     }
   };
 

@@ -34,6 +34,10 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
   top gradient.
 - Bottom: elapsed time — red 3 px progress with buffered track and a 12 px knob —
   total time. Dragging widens the track, enlarges the knob and shows a time bubble.
+  Coloured segment bands sit between the buffered bar and the red progress, so the
+  played part stays red and the unplayed part shows the segments. They come from the
+  video's own `kind="chapters"` track, or from the host app through
+  `__flashPlayer.setSegments([{start, end, label, color}])`.
 - Actions row: play/pause, -10 s, +10 s double chevrons (left); CC, settings,
   fullscreen (right). The center play/pause button appears only while paused.
 - Fullscreen follows the video's shape: a real screen-orientation lock to landscape
@@ -88,14 +92,35 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
   inline and the host is clipped to the same arc (`border-radius: 10px`,
   `overflow: hidden`) — host and video boxes coincide at
   348,260 311x175; dragged to (228,160), expand gives 0,0 675x449 with the clip released
-  back to `0px`/`visible`, close leaves no `#fp-host` and no `#fp-css` and an empty style
-  attribute on the video
+  back to `0px`/`visible`, close leaves no `#fp-host` and no `#fp-css` and no `style`
+  attribute on the video at all
 - mini controls: expand box 486,330 36x36 — centre (504,348) is the card centre, cross at
   621,262 with its right edge 2 px inside the card, both `background: rgba(0,0,0,0)`;
   layer opacity 0 with class `off` 4.2 s after entering mini, 0.98 after a single tap
   (which left `paused` false, i.e. tap no longer plays/pauses), 0 again 4.2 s later; a
   drag to 268,220 left them hidden; double-tap 90 ms apart expanded to 675x449 and the
   cross closed the player cleanly
+- track segments (local harness, 517x448 viewport, 120 s clip with a 4-cue
+  `kind="chapters"` WebVTT at 0/20/55/90 s): first open paints 4 bands 0.28 s after
+  `open()`; layer order inside the track is `buf, segs, fil, knob, tip`, so the red
+  progress covers the played part of every band; on a 401 px track the bands are
+  `0% +16.667%` (0,67 px), `16.667% +29.167%` (67,117), `45.833% +29.167%` (184,117),
+  `75% +25%` (301,100), all 3 px tall — the cue boundaries divided by the 120 s duration
+  exactly — in `rgb(142,36,170) rgb(0,137,123) rgb(244,81,30) rgb(57,73,171)`
+- a chapters track is only parsed by Chrome once it is `showing`, so `wakeChapters()`
+  raises the mode for the read and `close()` puts it back: `disabled` -> `showing` while
+  open -> `disabled` after close, measured; reopening re-detects (4 bands again)
+- `setSegments()` with 5 entries keeps the 3 valid ones (a reversed range and a
+  non-numeric range are dropped), honours an explicit `#e91e63` and fills the rest from
+  the palette (`0%+25%`, `50%+12.5%`, `66.667%+16.667%`), and overrides the auto-detected
+  chapters without the retry loop stealing them back
+- with segments on the track the rest of the chrome is unchanged: scrub 25% -> 65% shows
+  `.drag`, bubble `1:18`, fill 65%, release lands on 78.19 s of a wanted 78 s (playback
+  keeps running) and the 4 bands survive; CC still reports `No captions` although the
+  chapters track sits at `showing`; mini hides the bottom layer entirely (`display: none`)
+  so no bands show in the card; 4 open/close cycles (2 of them through mini) leave zero
+  `style` attributes on html, body and both page containers, 6 attributes on the video,
+  no `#fp-host`, no `#fp-css`, and the only console line is our own ready log
 - rotate: `translate(100vw,0) rotate(90deg)`, bounding box 0,0 539x448, controls
   upright; toggling Off restores the full-viewport layout
 - back chevron closes; restore leaves the video at 476x268 (24,72), page transform
@@ -129,6 +154,16 @@ inheriting the button's `currentColor` and turning the ring into a blob, and mar
 sinks (icons were built with `innerHTML`/`DOMParser`, which YouTube's
 `require-trusted-types-for 'script'` policy rejects; they are now `createElementNS`
 node factories).
+
+From the segment work: `for (const t of video.textTracks)` throws — `TextTrackList` has
+no `Symbol.iterator`, and the exception inside `open()` left a half-built player — so
+every walk is indexed; cues never appear while the track is `disabled` and its `load`
+event can fire before a listener attaches, so detection polls instead of listening;
+`toggleCC()` counted track *number* and then treated a chapters track as captions;
+and `restore()` used to write an empty `style=""` back onto nodes that had none, which
+Blink re-serialises after `removeAttribute` while the overlay's inline mutations are
+still flushing — it now verifies the node is clean, so a page never keeps an attribute
+we created.
 
 ## Verified 2026-11-04 (YouTube watch page)
 
@@ -222,6 +257,11 @@ policy object was needed (43,691 bytes in, `[flashplayer] 0.1.0 ready` logged).
   drops an explicit `Rotate screen = On` (measured: rotate On -> fullscreen press ->
   row back to Off on a landscape stream in a landscape viewport). Unresolved design
   question, not a crash.
+- Track segments are bands only: no chapter name on hover and no jump-to-next-chapter.
+  Automatic detection reads `video.textTracks` with `kind="chapters"`, which neither
+  YouTube nor the tested site exposes (both measured at 0 tracks), so on those sites the
+  bands appear only when the APK pushes `setSegments()`; the detection polls up to 8
+  times (first at 250 ms, then 1 s apart) and gives up after that.
 - Loading the script into a CSP/Trusted-Types site from a remote URL is refused by the
   page (measured on YouTube: `script-src` blocks the host, `eval` needs a TrustedScript).
   The player itself no longer uses markup sinks, and the APK route
