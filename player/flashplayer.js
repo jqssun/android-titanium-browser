@@ -963,9 +963,12 @@
 
     const st = document.createElement('style');
     st.id = 'fp-css';
+    /* The host carries an inline `all:initial`, so a :host() rule in the shadow sheet
+       cannot round it; this document rule with !important is what clips the mini. */
     st.textContent = 'video::-webkit-media-controls,video::-webkit-media-controls-enclosure,' +
       'video::-webkit-media-controls-panel,video::-webkit-media-controls-overlay-play-button{' +
-      'display:none!important;visibility:hidden!important}';
+      'display:none!important;visibility:hidden!important}' +
+      '#fp-host.mini{border-radius:10px!important;overflow:hidden!important}';
     (document.head || de).appendChild(st);
     S.hideCss = st;
   }

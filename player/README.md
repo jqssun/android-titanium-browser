@@ -47,9 +47,11 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
   time in the centre HUD; vertical drag on the left 25% is brightness, on the right
   25% is volume, the middle band does neither.
 - CC toggles the video's subtitle/caption tracks and turns red when active.
-- Mini: a `min(380, 46% of the viewport)` wide, 16:9 floating rectangle at 58% height
-  (square corners — the video is forced to `border-radius: 0`), draggable, tap to
-  play/pause, double-tap to expand.
+- Mini: a `min(380, 46% of the viewport)` wide, 16:9 floating card with 10 px rounded
+  corners (the video gets the radius inline, the overlay layer is clipped by a
+  document-level `#fp-host.mini` rule, which is the only thing that can beat the host's
+  inline `all:initial`), with expand/close, draggable, tap to play/pause, double-tap to
+  expand.
 - Keys (desktop): space/k, arrows, j/l, m, f, esc.
 
 ## Verified 2026-11-04 (YouTube-style chrome)
@@ -79,6 +81,12 @@ player container has `transform` + `overflow:hidden` and its own overlay UI.
   3.5 s hide; scrim tap closes; speed chips wrap to two rows (5 + 3) at 412 px
 - mini 248x140 at (275,260), dragged to (175,180), expand returns to 539x448;
   double-tap in mini expands too
+- mini corners (local harness, 675x449 viewport): the video gets `border-radius: 10px`
+  inline and the host is clipped to the same arc (`border-radius: 10px`,
+  `overflow: hidden`) — host and video boxes coincide at
+  348,260 311x175; dragged to (228,160), expand gives 0,0 675x449 with the clip released
+  back to `0px`/`visible`, close leaves no `#fp-host` and no `#fp-css` and an empty style
+  attribute on the video
 - rotate: `translate(100vw,0) rotate(90deg)`, bounding box 0,0 539x448, controls
   upright; toggling Off restores the full-viewport layout
 - back chevron closes; restore leaves the video at 476x268 (24,72), page transform
