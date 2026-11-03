@@ -47,8 +47,9 @@ Chrome follows the stock YouTube Android player (ReVanced) layout:
   time in the centre HUD; vertical drag on the left 25% is brightness, on the right
   25% is volume, the middle band does neither.
 - CC toggles the video's subtitle/caption tracks and turns red when active.
-- Mini: rounded floating player with expand/close, draggable, tap to play/pause,
-  double-tap to expand.
+- Mini: a `min(380, 46% of the viewport)` wide, 16:9 floating rectangle at 58% height
+  (square corners — the video is forced to `border-radius: 0`), draggable, tap to
+  play/pause, double-tap to expand.
 - Keys (desktop): space/k, arrows, j/l, m, f, esc.
 
 ## Verified 2026-11-04 (YouTube-style chrome)
@@ -142,6 +143,51 @@ TrustedScript gets through; without CORS the fetch itself is refused.
   `img-src` violation from its own player, and the expected "requestFullscreen ...
   user gesture" warning from the scripted pass
 
+## Verified 2026-11-04 (watch page of a site with its own JS player)
+
+Environment: bundled Chromium, 676x449 viewport, a `view_video.php?viewkey=…` watch page
+whose player is a page-side JS object (`window.MGP.players['playerDiv_…']`), not
+`<video controls>`. The script was injected with a plain `fetch` of the local file plus
+`(0,eval)(code)`: this page has no Trusted Types policy and no CSP, so unlike YouTube no
+policy object was needed (43,691 bytes in, `[flashplayer] 0.1.0 ready` logged).
+
+- the page starts with 6 `<video>` elements: 4 zero-size hover previews, one hidden
+  `player-html5`, and the live `mgp_videoElement` (656x369) — every one of them
+  `preload=none` with an empty `<source>`, and an age-confirmation modal on top. All of
+  that is still fine: `pickVideo()` returns the live element and the chip shows at
+  (454,377) 54x54
+- pre-roll runs through the **same** element: attached while a 30.04 s creative was
+  playing (`readyState` 4), and when the site swapped in the content stream the labels
+  followed to `11:17` (677.77 s) with no reopen
+- layout at open: host fixed 0,0 676x449, top 72, bottom 98 at y 351, seek track
+  560x3 at y 386 (buf 93, fill 43, knob 12), actions row 46 px of six 48x46 buttons at
+  y 399, title 386x20 at (58,18); every on-screen control of the site's own player
+  hit-tests to `#fp-host`, and the video went back to 0,133 656x369 on close
+- scrub: down at 30% -> bubble `3:23`, move to 75% -> `8:28`, knob 12 -> 16 px, release
+  -> `currentTime` 508.3 of 677.77 = exactly 75%
+- double-tap: right half +10.2 s, left half -9.7 s, ripple at 0.92 opacity on that side
+- zones (449 px high viewport): 12% down 120 px -> `brightness(0.733)`, HUD
+  `Brightness 73%`; 88% down 135 px from 0.8 -> HUD `Volume 50%`, `volume` 0.5; 50%
+  up 120 px -> neither the filter nor the volume moved
+- surface drag +150 px horizontally -> HUD and elapsed label both `9:36 / 11:17`
+- long-press 750 ms -> `playbackRate` 2 with HUD `2x faster`, back to the 1.5x setting
+  on lift
+- settings sheet at 150 ms: 440x186 centred at x 118, grab 32x4, 8 chips with `1x`
+  active; `1.50x` -> rate 1.5, sheet closed, row reads `1.5x`
+- mini: 311x175 at (349,260) = `min(380, 46% vw)` x 16:9, expand -> 0,0 676x449
+- CC: this site keeps captions out of `video.textTracks` too (0 tracks) -> HUD
+  `No captions`, icon white, `aria-pressed=false`
+- rotate: row `Off` -> `On`, video `translate(100vw, 0px) rotate(90deg)` (intrinsic
+  1280x720) with a 676x449 footprint and upright bars
+- fullscreen press with a 1280x720 stream in a landscape viewport: real fullscreen
+  refused, and correctly no CSS rotation was substituted (`transform: none`)
+- close/restore: 0 hosts left, chip back at (591,362), injected CSS gone, the video sits
+  inside the site's container again with **no** style attribute at all, and a single
+  open/close leaves the video plus all 8 ancestors with byte-identical style attributes;
+  the site's player carries on playing
+- console for the whole pass: our ready log and the expected `requestFullscreen ...
+  user gesture` warning — no player errors
+
 ## Known limits (v1)
 
 - Main frame only. Measured: a video in a same-origin iframe is invisible to the
@@ -155,6 +201,10 @@ TrustedScript gets through; without CORS the fetch itself is refused.
 - Page-specific overlays that are not inside the video's ancestor chain and sit at a
   higher stacking level are not hidden; the ancestor chain is raised to z-index
   2147483627 and the video to 2147483637.
+- The fullscreen button recomputes the rotation from the video's shape, so pressing it
+  drops an explicit `Rotate screen = On` (measured: rotate On -> fullscreen press ->
+  row back to Off on a landscape stream in a landscape viewport). Unresolved design
+  question, not a crash.
 - Loading the script into a CSP/Trusted-Types site from a remote URL is refused by the
   page (measured on YouTube: `script-src` blocks the host, `eval` needs a TrustedScript).
   The player itself no longer uses markup sinks, and the APK route
