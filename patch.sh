@@ -119,6 +119,10 @@ sed -i 's|render_frame_host->GetView()->EnableAutoResize(kMinSize, kMaxSize);|if
 sed -i '/^void ExtensionActionPopupContents::OnLoaded() {$/,/^}$/ s|^}$|if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE) Java_ExtensionActionPopupContents_resizeDueToAutoResize(AttachCurrentThread(), java_object_, 100000, 100000);\n}|' chrome/browser/ui/android/extensions/extension_action_popup_contents.cc
 sed -i 's|mPopupWindowAndroid =$|{ View decor = activity.getWindow().getDecorView(); webContents.setSize(decor.getWidth(), decor.getHeight()); }\n&|' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionPopup.java
 
+# ext: popup theme
+sed -i 's|\.setSelectionDropdownMenuDelegate(selectionDropdownMenuDelegate)|&.setSupportTheming(true)|' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionPopup.java # prefers-color-scheme
+sed -i 's|^\([[:space:]]*\)mThinWebView =$|\1ThinWebViewConstraints constraints = new ThinWebViewConstraints(); constraints.backgroundColor = activity.getColor(R.color.default_bg_color_baseline);\n&|;s|activity, new ThinWebViewConstraints(), mPopupWindowAndroid)|activity, constraints, mPopupWindowAndroid)|;s|new ColorDrawable(Color.WHITE)|new ColorDrawable(constraints.backgroundColor)|;/^import android.graphics.Color;$/d' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionActionPopup.java # background
+
 # ext: pin
 sed -i '/Pref.PIN_EXTENSIONS_MENU_BUTTON, this::updateMenuButtonPinState);$/a\if (!mPrefService.getBoolean(Pref.PIN_EXTENSIONS_MENU_BUTTON)) { mContainer.findViewById(R.id.extensions_menu_button).setVisibility(View.GONE); }' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java
 sed -i '/"ExtensionsToolbarCoordinatorImpl.requestLayoutWithViewUtils()");$/a\if (!isMenuButtonPinned()) { mContainer.findViewById(R.id.extensions_menu_button).setVisibility(View.GONE); }' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java
