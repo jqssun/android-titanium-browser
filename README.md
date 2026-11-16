@@ -88,6 +88,52 @@ flowchart TD
     style n7 stroke:#FF6D00
 ```
 
+### In-app update check
+
+`updater/java/src/app/titanium/update/FlashUpdateChecker.java` is compiled into
+the browser by the `update:` block in [`patch.sh`](patch.sh), which copies it
+into `titanium/chromium_src/chrome/android/java/src/…`, adds it to
+`chrome_java_ext_rel_path_sources` in `chrome_java_ext_sources.gni`, and inserts
+nine `IDS_FLASH_UPDATE_*` strings into `android_chrome_ext_strings.grdp`. Both
+files are created by the Vanadium patch series, so no new GN target is needed.
+
+The "latest version" comes from this repository's GitHub releases and needs no
+token, JSON endpoint or rate limit: a `HEAD` request to
+`https://github.com/jasav24/android-titanium-browser/releases/latest` with
+redirects disabled returns a `Location` ending
+`/releases/tag/titanium-<version>`. That tag form is only produced by the
+signed path of the [chained build](#building); the unsigned fallback is published
+as a prerelease (`titanium-<version>-unsigned`), and `releases/latest` excludes
+prereleases, so an unsigned build can never be offered as an update. The APK is
+then taken from the conventional asset path
+`releases/latest/download/<version>-arm64-v8a.apk`.
+
+Two entry points are wired in:
+
+- `ChromeTabbedActivity.onDeferredStartup()` — runs after the first frame, and
+  only prompts when the current version is neither the one already offered nor
+  the one dismissed with **Do not ask again**, and at least three days have
+  passed since the previous check.
+- **Settings → About Flash Browser** — a `Check for updates` row added next to
+  the OS-version row, which always queries.
+
+The dialog's **Download** action hands the APK to `android.app.DownloadManager`,
+so the progress and resume notification are the system's own; when the download
+completes an internal receiver opens the package installer on the downloaded
+file. `REQUEST_INSTALL_PACKAGES` is already declared in
+`chrome/android/java/AndroidManifest.xml`, and a `SecurityException` falls back
+to the per-app **Install unknown apps** screen.
+
+Limits worth knowing before testing:
+
+- Android gives no silent self-update for a normally installed APK, so the
+  system install sheet always needs a tap; the browser cannot finish the update
+  by itself.
+- **Do not ask again** is stored against the currently installed version, so it
+  stops applying as soon as an update is installed.
+- If the process dies during a download, the file and its notification are
+  owned by the system Downloads UI, which can be resumed and opened from there.
+
 ## Building
 
 The [**Chained build**](.github/workflows/chained-build.yml) workflow compiles

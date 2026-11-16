@@ -222,4 +222,31 @@ if (content::WebContents::HasLiveWebContentsForBrowserContext(profile)) { return
 sed -i 's/|| mSupportedProfileType == SupportedProfileType.REGULAR) {/|| mSupportedProfileType == SupportedProfileType.REGULAR || mSupportedProfileType == SupportedProfileType.MIXED) {/' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 sed -i 's/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD) {/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD || mSupportedProfileType == SupportedProfileType.MIXED) {/' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 
+# update: offer the newest release of this repository from inside the browser
+# The latest version is read from the Location header a HEAD request to /releases/latest answers,
+# which names the tag of the newest non-prerelease, non-draft release. That keeps the release REST
+# API out of it (60 unauthenticated requests per hour per IP, from every user's own address) and it
+# means a `titanium-<version>-unsigned` prerelease can never be offered as an update. The asset name
+# is the version plus the ABI build.sh produces, so the download URL needs no release lookup either.
+mkdir -p titanium/chromium_src/chrome/android/java/src/app/titanium/update
+cp $SCRIPT_DIR/updater/java/src/app/titanium/update/FlashUpdateChecker.java titanium/chromium_src/chrome/android/java/src/app/titanium/update/FlashUpdateChecker.java
+# chrome_java_ext_sources.gni is the downstream sources list that the "Extend //chrome/android java
+# targets sources and deps" patch of the Vanadium series already imports into //chrome/android:
+# chrome_java, so a new class costs one list entry instead of a new build target.
+sed -i 's|^chrome_java_ext_rel_path_sources = \[$|&\n  "java/src/app/titanium/update/FlashUpdateChecker.java",|' titanium/chromium_src/chrome/android/chrome_java_ext_sources.gni
+grep -qF '"java/src/app/titanium/update/FlashUpdateChecker.java",' titanium/chromium_src/chrome/android/chrome_java_ext_sources.gni || { echo "update: chrome_java_ext_sources.gni changed shape; the new class would not be compiled" >&2; exit 1; }
+# The series keeps its own strings in android_chrome_ext_strings.grdp, which is already included in
+# //chrome/browser/ui/android/strings, so these reach org.chromium.chrome.R as lowercase ids. The
+# brand sed above does not walk titanium/, so the product name is written out here.
+sed -i 's|^</grit-part>$|  <message name="IDS_FLASH_UPDATE_CHECK_TITLE" desc="About screen row that starts a manual check for a newer Flash Browser release">Check for updates</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_TITLE" desc="Title of the dialog offering a newer Flash Browser release">Update available</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_BODY" desc="Body of the dialog offering a newer Flash Browser release. $1 is the newest version, $2 the installed one.">Flash Browser $1 is available. You are running $2. Download and install it now?</message>\n  <message name="IDS_FLASH_UPDATE_ACTION" desc="Button that starts downloading the newer Flash Browser release">Download</message>\n  <message name="IDS_FLASH_UPDATE_NOT_NOW" desc="Button that closes the update dialog without doing anything">Not now</message>\n  <message name="IDS_FLASH_UPDATE_NO_MORE" desc="Button that stops the update dialog from appearing on this version">Do not ask again</message>\n  <message name="IDS_FLASH_UPDATE_LATEST" desc="Shown when a manual check finds no newer Flash Browser release. $1 is the installed version.">You have the latest version ($1).</message>\n  <message name="IDS_FLASH_UPDATE_FAILED" desc="Shown when the release page could not be reached">Could not reach the release page. Check the connection and try again.</message>\n  <message name="IDS_FLASH_UPDATE_STARTED" desc="Shown after the newer release download has been started">Download started. A notification appears when it finishes.</message>\n</grit-part>|' titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp
+grep -qF 'IDS_FLASH_UPDATE_AVAILABLE_BODY' titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp || { echo "update: android_chrome_ext_strings.grdp changed shape; the dialog has no strings" >&2; exit 1; }
+# Two one-line hooks, both into a method that already exists in the built tree: the About screen
+# gets its manual entry next to the OS version row, and the startup check rides on
+# ChromeTabbedActivity.onDeferredStartup(), just after its own isFinishing-or-destroyed guard, so
+# the work lands after first paint and a slow or offline release page cannot delay boot.
+sed -i 's|p.setSummary(AboutSettingsBridge.getOSVersion());|&\n        app.titanium.update.FlashUpdateChecker.addSettingsRow(this, p);|' chrome/android/java/src/org/chromium/chrome/browser/about_settings/AboutChromeSettings.java
+grep -qF 'FlashUpdateChecker.addSettingsRow(this, p);' chrome/android/java/src/org/chromium/chrome/browser/about_settings/AboutChromeSettings.java || { echo "update: AboutChromeSettings changed upstream" >&2; exit 1; }
+sed -i 's|Activity activity = ChromeTabbedActivity.this;|&\n        app.titanium.update.FlashUpdateChecker.maybeCheckFromStartup(activity);|' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
+grep -qF 'FlashUpdateChecker.maybeCheckFromStartup(activity);' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java || { echo "update: ChromeTabbedActivity.onDeferredStartup changed upstream" >&2; exit 1; }
+
 export PATCHED=1
