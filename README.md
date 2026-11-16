@@ -96,6 +96,11 @@ into `titanium/chromium_src/chrome/android/java/src/…`, adds it to
 `chrome_java_ext_rel_path_sources` in `chrome_java_ext_sources.gni`, and inserts
 nine `IDS_FLASH_UPDATE_*` strings into `android_chrome_ext_strings.grdp`. Both
 files are created by the Vanadium patch series, so no new GN target is needed.
+Every placeholder in those strings has to sit inside a `<ph name="…">$1</ph>`
+element: grit refuses a bare `$1` in message text
+(`PlaceholderNotInsidePhNode`), and because it only checks this when the strings
+target is built, the failure lands minutes into the compile rather than at patch
+time. `patch.sh` reads the part file back and applies the same rule itself.
 
 The "latest version" comes from this repository's GitHub releases and needs no
 token, JSON endpoint or rate limit: a `HEAD` request to
