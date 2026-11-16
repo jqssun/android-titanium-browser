@@ -134,6 +134,19 @@ Limits worth knowing before testing:
 - If the process dies during a download, the file and its notification are
   owned by the system Downloads UI, which can be resumed and opened from there.
 
+### In-page video player
+
+[`player/`](player/README.md) is shipped as a bundled extension rather than injected
+from Java. The `# player:` block in [`patch.sh`](patch.sh) registers
+`player/dist/flash-player.crx` through the same `extensions/bundle.py` the Titanium
+Extension is fetched with, so the id and version come from the packed artifact itself,
+and it installs on first run as an external-pref extension next to it. Its manifest is
+Manifest V3 with one content script over `http`/`https`, `world: "MAIN"` and
+`all_frames: true`, which is what lets the same script that was measured as a console
+snippet also run inside iframe players and survive a page's `script-src`.
+`player/repack.sh` re-packs it, and the build refuses a crx whose contents have drifted
+from `player/flashplayer.js` or `player/extension/manifest.json`.
+
 ## Building
 
 The [**Chained build**](.github/workflows/chained-build.yml) workflow compiles

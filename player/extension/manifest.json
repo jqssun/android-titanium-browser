@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Flash Player",
+  "description": "In-page video overlay for Flash Browser.",
+  "version": "1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwOQEm/f0UExL3E5IFUnKxhGnXFpUZWF3u4hEp9yr4r8+S3VfQ8jezz8zJ7qbVfSWeOkTU3Y+DNYFDSojj0bfw0kMifITXOdK5yqrGo6LlK6/hQI92RLOyjwChyixefYb9aojSZpEtm5Ws5fLO59CV4BAYpx+skrvD7EPraUlOXP5Ses9B38WRtSu+yzbi5iIccD1TZw1mtHmrf3B6eP2AxP43wdRmEPKYAB/YJlnJVEKVNjv4MB8Pn+66jgsd1ldl6sKaYNj+i0rtDR9jmq0JcS9FFCzXaFgIQEArUfhbOipm+7z2Q+UZhP33RwjXjF0O4bc9LEerJIC1WHFfouzMQIDAQAB",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["flashplayer.js"],
+      "all_frames": true,
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}

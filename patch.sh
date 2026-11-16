@@ -43,6 +43,71 @@ sed -i 's/\bTitanium\b/Flash Browser/g' chrome/android/java/res_titanium_base/va
 sed -i 's#return !OpenInAppUtils.isOpenInAppAvailable() || !UrlUtilities.isHttpOrHttps(url);#if (UrlUtilities.isHttpOrHttps(url)) return false;\n        return !OpenInAppUtils.isOpenInAppAvailable() || !UrlUtilities.isHttpOrHttps(url);#' chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java
 grep -qF 'if (UrlUtilities.isHttpOrHttps(url)) return false;' chrome/android/java/src/org/chromium/chrome/browser/externalnav/ExternalNavigationDelegateImpl.java || { echo "links: patch did not apply; ExternalNavigationDelegateImpl changed upstream" >&2; exit 1; }
 
+# player: ship the in-page video overlay as a bundled extension
+# player/flashplayer.js reaches pages as a content script declared with
+# "world": "MAIN" and "all_frames": true, which is how it keeps the behaviour that
+# was measured by hand in the console: it runs in the page's own world, in every
+# frame, and a page CSP that refuses a remote script cannot refuse this one. The
+# crx in player/dist is packed by player/repack.sh (the signing key lives outside
+# this repository, beside the release keystore), and its manifest version is
+# stamped from the packing time, so a repack is always a version increase and the
+# browser reinstalls instead of keeping the previous copy.
+# Registered through the same bundle.py the Titanium Extension is fetched with, so
+# the id, bundled.json and the asset list stay derived from the crx rather than
+# hardcoded here. A file:// URL points it at the committed artifact.
+python3 $SCRIPT_DIR/extensions/bundle.py $SCRIPT_DIR/extensions/dist flash-player "file://$SCRIPT_DIR/player/dist/flash-player.crx"
+grep -qF '"external_crx": "flash-player.crx",' $SCRIPT_DIR/extensions/dist/bundled.json || { echo "player: the overlay is not in bundled.json, so nothing installs it" >&2; exit 1; }
+grep -qF '"extensions/flash-player.crx",' $SCRIPT_DIR/extensions/dist/BUILD.gn || { echo "player: flash-player.crx is not staged as an APK asset" >&2; exit 1; }
+# A packed artifact goes stale the moment someone edits the script and forgets to
+# repack, so compare the bytes inside the crx against the source instead of
+# trusting the file that happens to be committed.
+python3 - "$SCRIPT_DIR/player/dist/flash-player.crx" "$SCRIPT_DIR/player/flashplayer.js" "$SCRIPT_DIR/player/extension/manifest.json" <<'PY' || { echo "player: dist/flash-player.crx is stale against player/; run player/repack.sh" >&2; exit 1; }
+import base64, hashlib, json, struct, sys, zipfile
+
+crx, script, template = sys.argv[1], sys.argv[2], sys.argv[3]
+archive = zipfile.ZipFile(crx)
+assert sorted(archive.namelist()) == ["flashplayer.js", "manifest.json"], archive.namelist()
+assert archive.read("flashplayer.js") == open(script, "rb").read()
+
+manifest = json.loads(archive.read("manifest.json"))
+source = json.load(open(template))
+source.pop("version")
+packed = dict(manifest)
+packed.pop("version")
+assert packed == source, "manifest drifted from player/extension/manifest.json"
+
+# The manifest key pins the extension id, so it has to be the key the crx was
+# actually signed with, or the build records one id and Chromium installs another.
+data = open(crx, "rb").read()
+assert data[:4] == b"Cr24", "not a CRX file"
+header = data[12:12 + struct.unpack("<I", data[8:12])[0]]
+
+
+def varint(buf, i):
+    value = shift = 0
+    while True:
+        byte = buf[i]
+        i += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            return value, i
+
+
+i = 0
+while i < len(header):
+    key, i = varint(header, i)
+    length, i = varint(header, i)
+    if key >> 3 == 10000:
+        break
+    i += length
+signed = header[i + 2:i + 18]
+assert len(signed) == 16, "no signing key in the crx header"
+assert hashlib.sha256(base64.b64decode(manifest["key"])).digest()[:16] == signed, \
+    "manifest key and signing key disagree"
+print("player: bundled script, manifest and signing key all match the source")
+PY
+
 cp -r $SCRIPT_DIR/extensions/dist titanium/
 cp $SCRIPT_DIR/extensions/stage_bundled_extensions.inc titanium/dist/
 sed -i 's|"//components/privacy_sandbox/privacy_sandbox_attestations/preload:privacy_sandbox_attestations_assets",|&"//titanium/dist:extension_assets",|' chrome/android/BUILD.gn

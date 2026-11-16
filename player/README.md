@@ -1,12 +1,13 @@
-# Flash Player (dev build)
+# Flash Player
 
 In-page video player with the control overlay of YouTube/ReVanced: it runs **inside
 the page**: a chip appears when a video exists, and tapping it re-parents nothing — the
 video element is restyled to fill the screen under a Shadow-DOM control layer, with the
 page's own player UI covered.
 
-Not shipped yet. This file is the source that will be baked into the browser as a
-Java-injected script; nothing here is in the APK.
+Shipped as a bundled extension: `extension/manifest.json` plus the packed
+`dist/flash-player.crx`, registered by the `# player:` block in `../patch.sh`. See
+[Shipping it](#shipping-it) for the mechanism, the id and what the build verifies.
 
 ## Try it
 
@@ -25,6 +26,74 @@ Console API: `__flashPlayer.open(video?)`, `.close()`, `.toggle()`, `.pickVideo(
 
 A local test page with a generated 2-minute WebM lives outside the repo:
 `%TEMP%\fp-test\` (`python serve.py 8765`, then http://127.0.0.1:8765/).
+
+## Shipping it
+
+The script is not compiled into Java and not fetched at runtime. It is packaged as a
+Chromium extension and installed by the browser itself at startup, through the same
+bundling path the Titanium Extension uses:
+
+- `extension/manifest.json` is the template. Manifest V3, one `content_scripts` entry
+  matching `http://*/*` and `https://*/*` with `all_frames: true`, `world: "MAIN"` and
+  `run_at: "document_idle"`, and a `key` that pins the extension id.
+- `dist/flash-player.crx` is the packed artifact, produced by `./repack.sh`.
+- `../patch.sh`'s `# player:` block registers that crx with `../extensions/bundle.py`
+  (the script the Titanium Extension is fetched with) from a local `file://` URL, which
+  derives the id and version from the crx, records them in `bundled.json`, and lists the
+  crx as an `android_assets` entry. The build stages it into the APK, and
+  `StageBundledExtensions` turns it into an external-pref install on first run.
+
+Why a content script rather than a Java-injected string: `world: "MAIN"` is the page's
+own world, which is exactly what the snippet route above measures, a manifest content
+script is not subject to the page's `script-src`, `all_frames` covers players that live
+in an iframe, and no upstream Java file needs a new anchor — `TabImpl.java` at this
+version has no page-load hook to hang an injection on, so the Java route would have
+meant guessing at a second integration point.
+
+Measured on Chrome 157.0.8103.51 with the staged folder loaded through CDP
+`Extensions.loadUnpacked`: the returned id is `ofmgkoigejimknamjdjgakdelpmhnjhf`, the
+same value derived independently from the signing key and from the manifest `key`, and
+on a two-frame HTTP page `window.__flashPlayer` (version `0.1.0`) was live in the main
+world of **both** frames. The packed crx was then confirmed to contain exactly
+`flashplayer.js` and `manifest.json`, byte-identical script, manifest identical to the
+template apart from `version`.
+
+### Repacking
+
+```sh
+./repack.sh            # writes dist/flash-player.crx
+```
+
+The signing key is deliberately **not** in this repository: it lives beside the release
+keystore at `/f/flash-player-extension-key.pem` (override with `FLASH_PLAYER_EXT_KEY`),
+and `player/extension/manifest.json` carries only its public half. Back it up with the
+keystore. If it is lost, generate a new one and replace the `key` value with the new
+SPKI base64 — the extension then gets a new id, and the build follows automatically
+because `bundle.py` reads the id from the crx rather than from anything hardcoded.
+
+`repack.sh` stamps `version` as `1.<seconds-since-epoch>`, so every repack is strictly
+higher than the last and Chromium reinstalls the extension instead of keeping the copy
+it already installed. Packing a repack is required whenever `flashplayer.js` or the
+manifest template changes; the build refuses to ship otherwise:
+
+```
+player: dist/flash-player.crx is stale against player/; run player/repack.sh
+```
+
+Three failure modes were exercised against the block in a scratch tree, each aborting
+with exit 1: script edited without repacking, manifest template edited without
+repacking, and (by construction, since the manifest `key` is compared with the key
+recorded in the crx header) a template whose key no longer matches the signing key.
+
+### What this means on a device
+
+- The player shows up as a normal row in `chrome://extensions` ("Flash Player") and can
+  be turned off there.
+- A chip appears in **every** frame that has a playing video larger than 4000 px, so a
+  video inside an ad or embed iframe gets its own chip. Narrowing that to the top frame
+  is a one-word manifest change (`all_frames: false`), not a code change.
+- An incognito tab only runs it if the extension is allowed in incognito, which is the
+  ordinary per-extension switch; not yet checked on an APK build.
 
 ## Controls
 
