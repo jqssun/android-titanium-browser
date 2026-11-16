@@ -298,8 +298,27 @@ grep -qF '"java/src/app/titanium/update/FlashUpdateChecker.java",' titanium/chro
 # The series keeps its own strings in android_chrome_ext_strings.grdp, which is already included in
 # //chrome/browser/ui/android/strings, so these reach org.chromium.chrome.R as lowercase ids. The
 # brand sed above does not walk titanium/, so the product name is written out here.
-sed -i 's|^</grit-part>$|  <message name="IDS_FLASH_UPDATE_CHECK_TITLE" desc="About screen row that starts a manual check for a newer Flash Browser release">Check for updates</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_TITLE" desc="Title of the dialog offering a newer Flash Browser release">Update available</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_BODY" desc="Body of the dialog offering a newer Flash Browser release. $1 is the newest version, $2 the installed one.">Flash Browser $1 is available. You are running $2. Download and install it now?</message>\n  <message name="IDS_FLASH_UPDATE_ACTION" desc="Button that starts downloading the newer Flash Browser release">Download</message>\n  <message name="IDS_FLASH_UPDATE_NOT_NOW" desc="Button that closes the update dialog without doing anything">Not now</message>\n  <message name="IDS_FLASH_UPDATE_NO_MORE" desc="Button that stops the update dialog from appearing on this version">Do not ask again</message>\n  <message name="IDS_FLASH_UPDATE_LATEST" desc="Shown when a manual check finds no newer Flash Browser release. $1 is the installed version.">You have the latest version ($1).</message>\n  <message name="IDS_FLASH_UPDATE_FAILED" desc="Shown when the release page could not be reached">Could not reach the release page. Check the connection and try again.</message>\n  <message name="IDS_FLASH_UPDATE_STARTED" desc="Shown after the newer release download has been started">Download started. A notification appears when it finishes.</message>\n</grit-part>|' titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp
+sed -i 's|^</grit-part>$|  <message name="IDS_FLASH_UPDATE_CHECK_TITLE" desc="About screen row that starts a manual check for a newer Flash Browser release">Check for updates</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_TITLE" desc="Title of the dialog offering a newer Flash Browser release">Update available</message>\n  <message name="IDS_FLASH_UPDATE_AVAILABLE_BODY" desc="Body of the dialog offering a newer Flash Browser release. $1 is the newest version, $2 the installed one.">Flash Browser <ph name="NEWER_VERSION">$1</ph> is available. You are running <ph name="INSTALLED_VERSION">$2</ph>. Download and install it now?</message>\n  <message name="IDS_FLASH_UPDATE_ACTION" desc="Button that starts downloading the newer Flash Browser release">Download</message>\n  <message name="IDS_FLASH_UPDATE_NOT_NOW" desc="Button that closes the update dialog without doing anything">Not now</message>\n  <message name="IDS_FLASH_UPDATE_NO_MORE" desc="Button that stops the update dialog from appearing on this version">Do not ask again</message>\n  <message name="IDS_FLASH_UPDATE_LATEST" desc="Shown when a manual check finds no newer Flash Browser release. $1 is the installed version.">You have the latest version (<ph name="INSTALLED_VERSION">$1</ph>).</message>\n  <message name="IDS_FLASH_UPDATE_FAILED" desc="Shown when the release page could not be reached">Could not reach the release page. Check the connection and try again.</message>\n  <message name="IDS_FLASH_UPDATE_STARTED" desc="Shown after the newer release download has been started">Download started. A notification appears when it finishes.</message>\n</grit-part>|' titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp
 grep -qF 'IDS_FLASH_UPDATE_AVAILABLE_BODY' titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp || { echo "update: android_chrome_ext_strings.grdp changed shape; the dialog has no strings" >&2; exit 1; }
+# grit rejects a $N formatter that is not wrapped in <ph> (PlaceholderNotInsidePhNode), and it only
+# says so when the strings target is built — 2m34s into the compile that hit it, 21 minutes into
+# the session once the tree has been restored. Read the part file back here instead so a bad copy
+# stops the session in its first minute.
+python3 - titanium/chromium_src/chrome/browser/ui/android/strings/android_chrome_ext_strings.grdp <<'PY' || { echo "update: a placeholder in the new strings sits outside a <ph> element, which grit refuses" >&2; exit 1; }
+import re, sys, xml.etree.ElementTree as ET
+
+def outside_ph(node):
+    text = node.text or ''
+    for child in node:
+        if child.tag != 'ph':
+            text += outside_ph(child)
+        text += child.tail or ''
+    return text
+
+for message in ET.parse(sys.argv[1]).getroot().iter('message'):
+    if re.search(r'\$\d', outside_ph(message)):
+        raise SystemExit('%s carries a bare placeholder' % message.get('name'))
+PY
 # Two one-line hooks, both into a method that already exists in the built tree: the About screen
 # gets its manual entry next to the OS version row, and the startup check rides on
 # ChromeTabbedActivity.onDeferredStartup(), just after its own isFinishing-or-destroyed guard, so
