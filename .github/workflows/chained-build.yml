@@ -330,14 +330,25 @@ jobs:
           esac
           # SIGINT reaches autoninja's whole process group, so ninja stops with a
           # consistent out/ instead of being killed at the job's own timeout.
+          started=$(date +%s)
           timeout --signal=INT --kill-after=120s "${budget}m" \
             ./build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
           status=${PIPESTATUS[0]}
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          if [ "$status" = "124" ]; then
-            echo "::notice::the session budget expired; the build was stopped and the tree will be cached"
-            exit 0
+          ran=$(( $(date +%s) - started ))
+          # timeout's exit code cannot be the test for a cut-off session. When the
+          # command does not die on the SIGINT it is escalated to SIGKILL, and GNU
+          # timeout 8.32 reports that as 137, which is what a session that finished
+          # 36713 targets with 0 failures actually exited with. The wall clock says
+          # the same thing without depending on signal semantics: a build that used
+          # the whole budget was stopped by it, not defeated by an error.
+          budget_hit=false
+          if [ "$status" != "0" ] && [ "$ran" -ge $(( budget * 60 - 15 )) ]; then
+            budget_hit=true
+            echo "::notice::the ${budget}m budget expired after ${ran}s with status $status; the build was stopped and the tree will be cached"
           fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "seconds=$ran" >> "$GITHUB_OUTPUT"
+          echo "budget=$budget_hit" >> "$GITHUB_OUTPUT"
           exit "$status"
 
       - name: Report progress
@@ -345,6 +356,10 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
+          # The build step is skipped entirely in probe mode and when the restored
+          # tree already holds the APK, so the absence of its output means "not a
+          # budget cut-off", which is the answer that stops the chain.
+          echo "budget=${{ steps.build.outputs.budget }}" >> "$GITHUB_OUTPUT"
           if [ -f build.log ]; then
             last=$(grep -oE '\[[0-9]+/[0-9]+\]' build.log | tail -1 || true)
             echo "last ninja counter: ${last:-not reached}"
@@ -484,18 +499,18 @@ jobs:
             echo "this session completed the build"
             exit 0
           fi
-          if [ "$status" = "124" ]; then
-            echo "::notice::the session ended on its time budget; the next one is queued below"
+          if [ '${{ steps.progress.outputs.budget }}' = 'true' ]; then
+            echo "::notice::the session ended on its ${{ steps.build.outputs.seconds }}s time budget; the next one is queued below"
             exit 0
           fi
-          echo "::error::the build failed on its own error (status $status); the cached tree was kept, so a fix to build.sh or args.gn resumes from it"
+          echo "::error::the build failed on its own error (status $status after ${{ steps.build.outputs.seconds }}s); the cached tree was kept, so a fix to build.sh or args.gn resumes from it"
           exit 1
 
       # Only a budget cut-off chains on. A build that failed on its own error
       # would fail the same way in the next session, so the job stays red and
       # waits for a fix.
       - name: Queue the next session
-        if: always() && steps.build.outputs.status == '124'
+        if: always() && steps.progress.outputs.budget == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
