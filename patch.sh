@@ -70,6 +70,64 @@ sed -i 's|import org.chromium.chrome.browser.flags.ActivityType;|&\nimport org.c
 sed -i '/^public class DevToolsIntentDataProvider extends BrowserServicesIntentDataProvider {$/a\ @Override public @CustomTabProfileType int getCustomTabMode() { return mIntent.getBooleanExtra("org.chromium.chrome.browser.devtools.DevTools.Incognito", false) ? CustomTabProfileType.INCOGNITO : CustomTabProfileType.REGULAR; }' chrome/android/java/src/org/chromium/chrome/browser/devtools/DevToolsIntentDataProvider.java
 sed -i 's|case CustomTabProfileType.INCOGNITO:|& if (getIntentDataProvider().getActivityType() == ActivityType.DEV_TOOLS) return null;|' chrome/android/java/src/org/chromium/chrome/browser/customtabs/BaseCustomTabActivity.java
 
+# dev: tab
+# open devtools as a tab in the inspected tab's window instead of a new window (activity)
+sed -i '/^  void AttachToBrowser(BrowserWindowInterface\* browser);$/a\
+#if BUILDFLAG(IS_ANDROID)\
+  // Attaches this devtools window to the tab strip of the browser window that hosts\
+  // the inspected tab, so that DevTools opens there as a new tab.\
+  bool AttachToInspectedBrowserAsTab();\
+#endif' chrome/browser/devtools/devtools_window.h
+sed -i '/^void DevToolsWindow::AttachToBrowser(BrowserWindowInterface\* browser) {$/i\
+#if BUILDFLAG(IS_ANDROID)\
+bool DevToolsWindow::AttachToInspectedBrowserAsTab() {\
+  if (!owned_main_web_contents_) return false;\
+  content::WebContents* inspected = GetInspectedWebContents();\
+  if (!inspected) return false;\
+  tabs::TabInterface* inspected_tab = tabs::TabInterface::MaybeGetFromContents(inspected);\
+  if (!inspected_tab) return false;\
+  BrowserWindowInterface* browser = inspected_tab->GetBrowserWindowInterface();\
+  if (!browser) return false;\
+  TabListInterface* tab_list = TabListInterface::From(browser);\
+  if (!tab_list) return false;\
+  // AttachToBrowser() transfers ownership of the frontend WebContents to the\
+  // tab list, so never fall back to launching a separate activity afterwards.\
+  AttachToBrowser(browser);\
+  tabs::TabInterface* devtools_tab = tab_list->GetTab(0);\
+  if (devtools_tab) tab_list->ActivateTab(devtools_tab->GetHandle());\
+  return true;\
+}\
+#endif' chrome/browser/devtools/devtools_window.cc
+sed -i '/^DEFINE_JNI(DevToolsWindowAndroid)$/i\
+static bool JNI_DevToolsWindowAndroid_AttachToInspectedBrowser(\
+    JNIEnv* env,\
+    const jni_zero::JavaRef<jobject>& java_web_contents) {\
+#if BUILDFLAG(ENABLE_DEVTOOLS_FRONTEND)\
+  content::WebContents* web_contents =\
+      content::WebContents::FromJavaWebContents(java_web_contents);\
+  DevToolsWindow* window = DevToolsWindow::AsDevToolsWindow(web_contents);\
+  return window && window->AttachToInspectedBrowserAsTab();\
+#else\
+  return false;\
+#endif\
+}' chrome/browser/devtools/android/devtools_window_android.cc
+sed -i '/^    @NativeMethods$/i\
+    /**\
+     * Attaches the DevTools frontend to the tab strip of the browser window hosting the\
+     * inspected tab, so that DevTools opens as a new tab instead of a new window.\
+     *\
+     * @param webContents DevTools frontend web contents.\
+     * @return Whether the frontend was attached to a tab strip.\
+     */\
+    public static boolean attachToInspectedBrowser(WebContents webContents) {\
+        return DevToolsWindowAndroidJni.get().attachToInspectedBrowser(webContents);\
+    }\
+' chrome/browser/devtools/android/java/src/org/chromium/chrome/browser/devtools/DevToolsWindowAndroid.java
+sed -i '/^                WebContents webContents, JniPtr browserWindow);$/a\
+        boolean attachToInspectedBrowser(WebContents webContents);' chrome/browser/devtools/android/java/src/org/chromium/chrome/browser/devtools/DevToolsWindowAndroid.java
+sed -i 's|    static void launchDevToolsActivity(WebContents webContents) {|& if (DevToolsWindowAndroid.attachToInspectedBrowser(webContents)) return;|' chrome/android/java/src/org/chromium/chrome/browser/devtools/DevToolsActivity.java
+for f in chrome/browser/devtools/devtools_window.h chrome/browser/devtools/devtools_window.cc chrome/browser/devtools/android/devtools_window_android.cc chrome/browser/devtools/android/java/src/org/chromium/chrome/browser/devtools/DevToolsWindowAndroid.java chrome/android/java/src/org/chromium/chrome/browser/devtools/DevToolsActivity.java; do grep -q "AttachToInspectedBrowserAsTab\|attachToInspectedBrowser" "$f" || { echo "devtools tab patch failed: $f"; exit 1; }; done
+
 # dev: viewport
 sed -i 's|<meta charset="utf-8">|&\n<meta name="viewport" content="width=device-width">|' third_party/devtools-frontend/src/front_end/entrypoint_template.html
 sed -i '$a@media (max-width: 600px) { .settings-window-title, .tabbed-pane-header-tab-title { display: none; } .tabbed-pane-shadow.vertical-tab-layout .tabbed-pane-header-tabs { width: auto; } }' third_party/devtools-frontend/src/front_end/panels/settings/settingsScreen.css
