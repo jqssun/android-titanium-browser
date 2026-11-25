@@ -165,6 +165,9 @@ sed -i 's|<item type="id" name="manage_all_windows_menu_id" />|&<item type="id" 
 sed -i 's|^\( *\)if (MultiWindowUtils.shouldShowManageWindowsMenu())|\1if (isIncognito \&\& MultiWindowUtils.isMultiInstanceApi31Enabled()) modelList.add(new ListItem(AppMenuHandler.AppMenuItemType.STANDARD, AppMenuItemUtils.buildModelForStandardMenuItem(mContext, getAppMenuItemTheme(), R.id.incognito_toggle_menu_id, R.string.accessibility_tabstrip_btn_incognito_toggle_incognito, R.drawable.ic_open_in_browser, false)));\n&|' chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java # regular
 sed -i 's|if (id == R.id.manage_all_windows_menu_id) {|if (id == R.id.incognito_toggle_menu_id) { int w = MultiWindowUtils.getLastAccessedWindowIdExcludingSelf(mInstanceId, PersistedInstanceType.REGULAR); if (w != INVALID_WINDOW_ID) openWindow(w, NewWindowAppSource.WINDOW_MANAGER); else openNewWindow(false); return true; } &|' chrome/android/java/src/org/chromium/chrome/browser/multiwindow/MultiInstanceManagerApi31.java # regular
 
+# hub: new tab button on the right
+sed -n '/<Button$/,/\/>/p' chrome/browser/hub/internal/android/res/layout/hub_toolbar_layout.xml | sed -i -e '/<Button$/,/\/>/d' -e '/<!-- On tablets, the searchbox/r /dev/stdin' chrome/browser/hub/internal/android/res/layout/hub_toolbar_layout.xml
+
 # crbug.com/406136787: load unpacked
 sed -i 's|ResolveResult current = queryDocument(tree, rootUri, null);|if ("com.android.externalstorage.documents".equals(mAuthority) \&\& mRelativePath.length > 0) { String rel = String.join("/", mRelativePath); ResolveResult fast = queryDocument(tree, DocumentsContract.buildDocumentUriUsingTree(tree, mTreeId.endsWith(":") ? mTreeId + rel : mTreeId + "/" + rel), null); if (fast.status == FileError.FILE_OK) return fast; }\n&|' base/android/java/src/org/chromium/base/VirtualDocumentPath.java
 
