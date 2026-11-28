@@ -1,3 +1,5 @@
 [submodule "vanadium"]
 	path = vanadium
 	url = https://github.com/GrapheneOS/Vanadium.git
+	shallow = true
+	ignore = dirty
